@@ -17,31 +17,34 @@ development and experimentation.
 
 ## Governing Equations
 
-The solver is based on the two-dimensional incompressible Navier–Stokes equations:
+### Continuity Equation
 
-Continuity equation:
+$$
+\nabla \cdot \mathbf{u} = 0
+$$
 
-∇ · u = 0
+### Momentum Equations
 
-Momentum equations:
-
-∂u/∂t + (u · ∇)u = - (1/ρ) ∇p + ν ∇²u
+$$
+\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}
+$$
 
 Where:
-- u = velocity vector field
-- p = pressure field
-- ρ = density
-- ν = kinematic viscosity
+
+- $\mathbf{u}$ = velocity vector field  
+- $p$ = pressure field  
+- $\rho$ = density  
+- $\nu$ = kinematic viscosity
 
 ---
 
 ## Numerical Method
 
-- Spatial discretization: Finite Difference Method (FDM)
-- Grid type: Structured Cartesian grid
-- Pressure–velocity coupling: Projection method
-- Time integration: Explicit scheme (current implementation)
-- Pressure solution: Poisson equation solver
+- Spatial discretization: Finite Difference Method (FDM)  
+- Grid type: Structured Cartesian grid  
+- Pressure–velocity coupling: Projection method  
+- Time integration: Explicit scheme (current implementation)  
+- Pressure solution: Poisson equation solver  
 
 Future improvements may include stability enhancements and improved discretization schemes.
 
@@ -49,41 +52,42 @@ Future improvements may include stability enhancements and improved discretizati
 
 ## Current Capabilities
 
-- 2D incompressible flow
-- Uniform structured mesh
-- Basic boundary condition framework
+- 2D incompressible flow  
+- Uniform structured mesh  
+- Basic boundary condition framework  
 - Benchmark validation cases under development
 
 ---
 
 ## Project Structure
 
-src/  
-    mesh.py              Grid generation and spacing  
-    fields.py            Velocity and pressure field definitions  
-    boundary.py          Boundary condition handling  
-    solver.py            Time-stepping and Navier–Stokes integration  
-    poisson.py           Pressure Poisson equation solver  
-    utils.py             Helper and utility functions  
+src/
+mesh.py Grid generation and spacing
+fields.py Velocity and pressure field definitions
+boundary.py Boundary condition handling
+solver.py Time-stepping and Navier–Stokes integration
+poisson.py Pressure Poisson equation solver
+utils.py Helper and utility functions
 
-examples/  
-    lid_driven_cavity.py Standard benchmark case  
-    couette_flow.py      Analytical validation case  
+examples/
+lid_driven_cavity.py Standard benchmark case
+couette_flow.py Analytical validation case
 
-tests/  
-    test_mesh.py         Mesh verification  
-    test_poisson.py      Pressure solver consistency tests  
+tests/
+test_mesh.py Mesh verification
+test_poisson.py Pressure solver consistency tests
 
-docs/  
-    derivations.md       Discretization details and derivations  
+docs/
+derivations.md Discretization notes and derivations
+
 
 ---
 
 ## Requirements
 
-- Python 3.10+
-- NumPy
-- Matplotlib
+- Python 3.10+  
+- NumPy  
+- Matplotlib  
 
 Install dependencies:
 
