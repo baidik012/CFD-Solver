@@ -18,10 +18,10 @@ Describes the balance of convective, pressure, and viscous forces.
 $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}$$
 
 **Variables:**
-* u: Velocity vector field
-* p: Pressure field
-* rho: Density
-* nu: Kinematic viscosity
+* $\mathbf{u}$: Velocity vector field
+* $p$: Pressure field
+* $\rho$: Density
+* $\nu$: Kinematic viscosity
 
 ---
 
@@ -30,9 +30,9 @@ To solve these Partial Differential Equations (PDEs), we use the following numer
 
 * **Spatial Discretization:** Finite Difference Method (FDM) on a Structured Cartesian Grid.
 * **The Trigger:** For incompressible flows, we use the **Projection Method (Chorin’s Method)** to handle the pressure-velocity coupling.
-* **The Path (Logic Steps):** 1. Predictor: Calculate an intermediate velocity u* by solving the momentum equation.
-    2. Poisson: Solve the Pressure Poisson Equation to find the pressure field.
-    3. Corrector: Project u* onto a divergence-free space to get the final velocity u_n+1.
+* **The Path (Logic Steps):** 1. **Predictor:** Calculate an intermediate velocity $\mathbf{u}^*$ by solving the momentum equation.
+    2. **Poisson:** Solve the Pressure Poisson Equation to find the pressure field.
+    3. **Corrector:** Project $\mathbf{u}^*$ onto a divergence-free space to get the final velocity $\mathbf{u}^{n+1}$.
 
 
 
@@ -41,45 +41,62 @@ To solve these Partial Differential Equations (PDEs), we use the following numer
 ## 3. Project Structure
 The following structure is the planned architecture for the solver. The Python files listed below are placeholders to be developed by the club members:
 
+```text
 src/
     (TBD).py        # Future Logic: Grid generation, solver, and physics modules
 
 examples/           # Planned benchmark cases (e.g., Lid-Driven Cavity)
 tests/              # Verification scripts and unit tests
 docs/               # Detailed derivations and discretization notes
+```
 
 ---
 
 ## 4. Setup and Usage
 
 ### Concept: Reproducibility
-We use Virtual Environments to ensure every club member uses the same library versions, preventing dependency conflicts across different machines.
+We use **Virtual Environments** to ensure every club member uses the same library versions, preventing dependency conflicts across different machines.
 
 ### Execution: Installation
-1. Clone the Repository:
-   git clone [https://github.com/baidik012/CFD-Solver.git](https://github.com/baidik012/CFD-Solver.git)
-   cd CFD-Solver
 
-2. Create and Activate Virtual Environment:
-   python -m venv venv
+**1. Clone the Repository:**
+```bash
+git clone https://github.com/baidik012/CFD-Solver.git
+cd CFD-Solver
+```
 
-   Windows: venv\Scripts\activate
-   Mac/Linux: source venv/bin/activate
+**2. Create and Activate Virtual Environment:**
+```bash
+# Create the environment
+python -m venv venv
 
-3. Install Dependencies:
-   pip install -r requirements.txt
+# Activate (Windows)
+venv\Scripts\activate
+
+# Activate (Mac/Linux)
+source venv/bin/activate
+```
+
+**3. Install Dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
 ### Execution: Running a Simulation
-Trigger: Once the examples are developed, run all commands from the root directory so Python correctly maps the project paths.
+**Trigger:** Once the examples are developed, run all commands from the **root directory** so Python correctly maps the project paths.
 
-Example Command:
-python examples/your_script_name.py
+```bash
+# Example Command (To be updated as scripts are created)
+python examples/lid_driven_cavity.py
+```
+
+
 
 ---
 
 ## 5. Club Contribution Guidelines
-1. Work on Branches: Never push directly to main. Use 'git checkout -b feature-your-name'.
-2. No Data in Repo: Do not upload .png, .mp4, or large .log files. Use a .gitignore file.
-3. Review: Once your feature is ready, open a Pull Request for the club leads to review.
+1. **Work on Branches:** Never push directly to `main`. Use `git checkout -b feature-your-name`.
+2. **No Data in Repo:** Do not upload `.png`, `.mp4`, or large `.log` files. Use a `.gitignore` file.
+3. **Review:** Once your feature is ready, open a **Pull Request** for the club leads to review.
 
-> Note: This project is for educational use only. It is not validated for industrial or safety-critical applications.
+> **Note:** This project is for **educational use only**. It is not validated for industrial or safety-critical applications.
