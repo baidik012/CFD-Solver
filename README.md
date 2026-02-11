@@ -1,83 +1,69 @@
 # CFD Solver (Club Internal)
 
-This repository contains an internal Computational Fluid Dynamics (CFD) solver
-developed by the club for studying numerical methods applied to incompressible
-fluid flow. The project is educational in nature and intended for collaborative
-development and experimentation.
+This repository contains an internal Computational Fluid Dynamics (CFD) solver developed by the club for studying numerical methods applied to incompressible fluid flow. 
 
 ---
 
-## Scope
+## 1. Concept: The Physics
+This solver is designed to simulate **Incompressible Newtonian Flows**. The logic is governed by the conservation of mass and momentum.
 
-- Educational and exploratory use only
-- Focused on understanding numerical implementation of the incompressible Navier–Stokes equations
-- Not validated for industrial, commercial, or safety-critical applications
+### Governing Equations
 
----
+**Continuity Equation (Mass Conservation):** Ensures the velocity field remains solenoidal (divergence-free).
+$$\nabla \cdot \mathbf{u} = 0$$
 
-## Governing Equations
+**Momentum Equations (Navier–Stokes):** Describes the balance of convective, pressure, and viscous forces.
+$$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}$$
 
-### Continuity Equation
-
-$$
-\nabla \cdot \mathbf{u} = 0
-$$
-
-### Momentum Equations
-
-$$
-\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}
-$$
-
-Where:
-
-- $\mathbf{u}$ = velocity vector field  
-- $p$ = pressure field  
-- $\rho$ = density  
-- $\nu$ = kinematic viscosity
+**Variables:**
+* $\mathbf{u}$: Velocity vector field
+* $p$: Pressure field
+* $\rho$: Density
+* $\nu$: Kinematic viscosity
 
 ---
 
-## Numerical Method
+## 2. Execution: Numerical Implementation
+To solve these partial differential equations (PDEs) on a computer, we use a specific "Numerical Recipe":
 
-- Spatial discretization: Finite Difference Method (FDM)  
-- Grid type: Structured Cartesian grid  
-- Pressure–velocity coupling: Projection method  
-- Time integration: Explicit scheme (current implementation)  
-- Pressure solution: Poisson equation solver  
+* **Spatial Discretization:** Finite Difference Method (FDM).
+* **Grid Topology:** Structured Cartesian grid.
+* **The Trigger:** To handle the pressure-velocity coupling in incompressible flows, we use the **Projection Method (Chorin’s Method)**.
+* **The Path:** 1. Calculate an intermediate velocity $\mathbf{u}^*$ (ignoring pressure).
+    2. Solve the **Pressure Poisson Equation** to find the pressure field that makes the velocity divergence-free.
+    3. Project the intermediate velocity onto a divergence-free space to get $\mathbf{u}^{n+1}$.
 
-Future improvements may include stability enhancements and improved discretization schemes.
 
----
-
-## Current Capabilities
-
-- 2D incompressible flow  
-- Uniform structured mesh  
-- Basic boundary condition framework  
-- Benchmark validation cases under development
 
 ---
 
-## Project Structure
+## 3. Project Structure
+The code is modularized to separate the physics from the math helpers:
 
 ```text
 src/
-    mesh.py              Grid generation and spacing
-    fields.py            Velocity and pressure field definitions
-    boundary.py          Boundary condition handling
-    solver.py            Time-stepping and Navier–Stokes integration
-    poisson.py           Pressure Poisson equation solver
-    utils.py             Helper and utility functions
+    mesh.py         # Logic: Grid generation and spacing
+    fields.py       # Logic: Array definitions for U, V, and P
+    boundary.py     # Logic: BC implementation (No-slip, Inflow, etc.)
+    solver.py       # Logic: Time-stepping and N-S integration
+    poisson.py      # Logic: The iterative Pressure Poisson solver
+    utils.py        # Logic: Plotting and helper functions
 
-examples/
-    lid_driven_cavity.py Standard benchmark case
-    couette_flow.py      Analytical validation case
-
-tests/
-    test_mesh.py         Mesh verification
-    test_poisson.py      Pressure solver consistency tests
-
-docs/
-    derivations.md       Discretization notes and derivations
+examples/           # Pre-configured benchmark cases
+tests/              # Verification and unit tests
+docs/               # Detailed derivations and notes
 ```
+---
+
+## 4. Setup and Usage
+
+### Concept: Reproducibility
+To ensure the solver runs the same way on everyone's machine, we use a **Virtual Environment**. This prevents "Dependency Hell" where one person's version of NumPy conflicts with another's.
+
+### Execution: Installation Steps
+
+**1. Clone the Repository**
+Access the code locally by cloning the private repo:
+```bash
+git clone https://github.com/[baidik012]/[CFD-Solver].git
+cd [CFD-Solver]
