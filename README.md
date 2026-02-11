@@ -28,18 +28,18 @@ $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} =
 ## 2. Execution: Numerical Implementation
 To solve these Partial Differential Equations (PDEs), we use the following numerical recipe:
 
-* **Spatial Discretization:** Finite Difference Method (FDM) on a Structured Cartesian Grid.
+* **Spatial Discretization:** Finite Difference Method (FDM) on a **Structured Cartesian Grid**.
 * **The Trigger:** For incompressible flows, we use the **Projection Method (Chorin’s Method)** to handle the pressure-velocity coupling.
-* **The Path (Logic Steps):** 1. **Predictor:** Calculate an intermediate velocity $\mathbf{u}^*$ by solving the momentum equation.
-    2. **Poisson:** Solve the Pressure Poisson Equation to find the pressure field.
-    3. **Corrector:** Project $\mathbf{u}^*$ onto a divergence-free space to get the final velocity $\mathbf{u}^{n+1}$.
+* **The Path (Logic Steps):** 1. **Predictor:** Calculate an intermediate velocity $\mathbf{u}^*$ by solving the momentum equation (omitting the pressure gradient).
+    2. **Poisson:** Solve the Pressure Poisson Equation $\nabla^2 p = \frac{\rho}{\Delta t} \nabla \cdot \mathbf{u}^*$ to find the pressure field.
+    3. **Corrector:** Project $\mathbf{u}^*$ onto a divergence-free space to get the final velocity $\mathbf{u}^{n+1}$ using the pressure gradient.
 
 
 
 ---
 
 ## 3. Project Structure
-The following structure is the planned architecture for the solver. The Python files listed below are placeholders to be developed by the club members:
+The following structure is the planned architecture for the solver. These are placeholders for the development phase:
 
 ```text
 src/
@@ -55,7 +55,7 @@ docs/               # Detailed derivations and discretization notes
 ## 4. Setup and Usage
 
 ### Concept: Reproducibility
-We use **Virtual Environments** to ensure every club member uses the same library versions, preventing dependency conflicts across different machines.
+We use **Virtual Environments** to ensure every club member uses the same library versions, preventing dependency conflicts.
 
 ### Execution: Installation
 
@@ -83,7 +83,7 @@ pip install -r requirements.txt
 ```
 
 ### Execution: Running a Simulation
-**Trigger:** Once the examples are developed, run all commands from the **root directory** so Python correctly maps the project paths.
+**Trigger:** Run all commands from the **root directory** so Python finds the `src/` folder.
 
 ```bash
 # Example Command (To be updated as scripts are created)
@@ -96,7 +96,7 @@ python examples/lid_driven_cavity.py
 
 ## 5. Club Contribution Guidelines
 1. **Work on Branches:** Never push directly to `main`. Use `git checkout -b feature-your-name`.
-2. **No Data in Repo:** Do not upload `.png`, `.mp4`, or large `.log` files. Use a `.gitignore` file.
+2. **No Data in Repo:** Do not upload `.png`, `.mp4`, or large `.log` files.
 3. **Review:** Once your feature is ready, open a **Pull Request** for the club leads to review.
 
 > **Note:** This project is for **educational use only**. It is not validated for industrial or safety-critical applications.
