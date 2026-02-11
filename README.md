@@ -1,6 +1,6 @@
 # CFD Solver (Club Internal)
 
-This repository contains an internal Computational Fluid Dynamics (CFD) solver developed by the club for studying numerical methods applied to incompressible fluid flow. 
+This repository contains an internal Computational Fluid Dynamics (CFD) solver developed by the club for studying numerical methods applied to incompressible fluid flow. Not recommended for commercial purposes
 
 ---
 
