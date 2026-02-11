@@ -80,3 +80,4 @@ tests/
 
 docs/
     derivations.md       Discretization notes and derivations
+```
