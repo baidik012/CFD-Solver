@@ -1,16 +1,17 @@
 # CFD Solver (Club Internal)
 
-This repository contains an internal **Computational Fluid Dynamics (CFD)** solver developed by the club for studying numerical methods applied to incompressible fluid flow.  
-
-The project is **educational** in nature and intended for collaborative development, learning, and experimentation.
+This repository contains an internal Computational Fluid Dynamics (CFD) solver
+developed by the club for studying numerical methods applied to incompressible
+fluid flow. The project is educational in nature and intended for collaborative
+development and experimentation.
 
 ---
 
 ## Scope
 
-- Educational and exploratory use **only**
+- Educational and exploratory use only
 - Focused on understanding numerical implementation of the incompressible Navier–Stokes equations
-- **Not validated** for industrial, commercial, or safety-critical applications
+- Not validated for industrial, commercial, or safety-critical applications
 
 ---
 
@@ -26,28 +27,23 @@ $$
 \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}
 $$
 
-Where:  
+Where:
 - $\mathbf{u}$ = velocity vector field  
 - $p$ = pressure field  
-- $\rho$ = density (constant for incompressible flow)  
+- $\rho$ = density  
 - $\nu$ = kinematic viscosity
 
 ---
 
 ## Numerical Method
 
-- **Spatial discretization**: Finite Difference Method (FDM)  
-- **Grid type**: Structured Cartesian grid  
-- **Pressure–velocity coupling**: Projection method  
-- **Time integration**: Explicit scheme (current implementation)  
-- **Pressure solution**: Poisson equation solver  
+- Spatial discretization: Finite Difference Method (FDM)  
+- Grid type: Structured Cartesian grid  
+- Pressure–velocity coupling: Projection method  
+- Time integration: Explicit scheme (current implementation)  
+- Pressure solution: Poisson equation solver  
 
-Future improvements may include:
-
-- Stability enhancements (e.g. implicit / semi-implicit time stepping)
-- Higher-order discretization schemes
-- Multi-grid or other efficient Poisson solvers
-- Support for non-uniform grids
+Future improvements may include stability enhancements and improved discretization schemes.
 
 ---
 
@@ -64,39 +60,34 @@ Future improvements may include:
 
 ```text
 src/
-├── mesh.py          Grid generation and spacing
-├── fields.py        Velocity and pressure field definitions
-├── boundary.py      Boundary condition handling
-├── solver.py        Time-stepping and Navier–Stokes integration
-├── poisson.py       Pressure Poisson equation solver
-└── utils.py         Helper and utility functions
+    mesh.py              Grid generation and spacing
+    fields.py            Velocity and pressure field definitions
+    boundary.py          Boundary condition handling
+    solver.py            Time-stepping and Navier–Stokes integration
+    poisson.py           Pressure Poisson equation solver
+    utils.py             Helper and utility functions
 
 examples/
-├── lid_driven_cavity.py    Standard benchmark case
-└── couette_flow.py         Analytical validation cases
+    lid_driven_cavity.py Standard benchmark case
+    couette_flow.py      Analytical validation case
 
 tests/
-├── test_mesh.py            Mesh verification
-└── test_poisson.py         Pressure solver consistency tests
+    test_mesh.py         Mesh verification
+    test_poisson.py      Pressure solver consistency tests
 
 docs/
-└── derivations.md          Discretization notes and derivations
-
----
+    derivations.md       Discretization notes and derivations
 
 ## Requirements
+The solver depends on Python 3.10+ and the following Python packages:
+    numpy
+    matplotlib
 
-- Python 3.10 or higher  
-- Python packages:
-  - `numpy`
-  - `matplotlib`
+Install dependencies using pip:
+    pip install numpy matplotlib
 
-### Installation
-
-```bash
-# Recommended: create a virtual environment first
-python -m venv .venv
-source .venv/bin/activate    # Linux / macOS
-# .venv\Scripts\activate      # Windows
-
-pip install numpy matplotlib
+    # Recommended (optional but strongly suggested):
+    # python -m venv .venv
+    # source .venv/bin/activate          # Linux/macOS
+    # .venv\Scripts\activate             # Windows
+    # pip install numpy matplotlib
