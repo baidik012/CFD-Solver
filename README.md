@@ -18,16 +18,19 @@ development and experimentation.
 ## Governing Equations
 
 ### Continuity Equation
+
 $$
 \nabla \cdot \mathbf{u} = 0
 $$
 
 ### Momentum Equations
+
 $$
 \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}
 $$
 
 Where:
+
 - $\mathbf{u}$ = velocity vector field  
 - $p$ = pressure field  
 - $\rho$ = density  
@@ -77,17 +80,3 @@ tests/
 
 docs/
     derivations.md       Discretization notes and derivations
-
-## Requirements
-The solver depends on Python 3.10+ and the following Python packages:
-    numpy
-    matplotlib
-
-Install dependencies using pip:
-    pip install numpy matplotlib
-
-    # Recommended (optional but strongly suggested):
-    # python -m venv .venv
-    # source .venv/bin/activate          # Linux/macOS
-    # .venv\Scripts\activate             # Windows
-    # pip install numpy matplotlib
