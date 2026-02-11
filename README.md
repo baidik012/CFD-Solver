@@ -61,6 +61,8 @@ Future improvements may include:
 ---
 
 ## Project Structure
+
+```text
 src/
 ├── mesh.py          Grid generation and spacing
 ├── fields.py        Velocity and pressure field definitions
@@ -68,12 +70,15 @@ src/
 ├── solver.py        Time-stepping and Navier–Stokes integration
 ├── poisson.py       Pressure Poisson equation solver
 └── utils.py         Helper and utility functions
+
 examples/
 ├── lid_driven_cavity.py    Standard benchmark case
-└── couette_flow.py         Analytical validation case
+└── couette_flow.py         Analytical validation cases
+
 tests/
 ├── test_mesh.py            Mesh verification
 └── test_poisson.py         Pressure solver consistency tests
+
 docs/
 └── derivations.md          Discretization notes and derivations
 
