@@ -1,4 +1,6 @@
-@@ -4,17 +4,28 @@ This repository contains an internal Computational Fluid Dynamics (CFD) solver d
+# CFD Solver (Club Internal)
+
+This repository contains an internal Computational Fluid Dynamics (CFD) solver developed by the club for studying numerical methods applied to incompressible fluid flow.
 
 ---
 
@@ -27,17 +29,22 @@ Describes the balance of convective, pressure, and viscous forces.
 $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}$$
 
 **Variables:**
-@@ -29,24 +40,25 @@ $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} =
+* $\mathbf{u}$: Velocity vector field
+* $p$: Pressure field
+* $\rho$: Density
+* $\nu$: Kinematic viscosity
+
+---
+
+## 2. Execution: Numerical Implementation
 To solve these Partial Differential Equations (PDEs), we use the following numerical recipe:
 
 * **Spatial Discretization:** Finite Difference Method (FDM) on a **Structured Cartesian Grid**.
 * **The Decoupling Strategy:** For incompressible flows, we use the **Projection Method (Chorin's Method)** to decouple the velocity and pressure fields.
 * **The Algorithm Steps:**
-    1. **Predictor:** Solve the momentum equation without the pressure gradient to find an intermediate velocity $\mathbf{u}^*$.
-    2. **Poisson:** Solve the Pressure Poisson Equation $\nabla^2 p = \frac{\rho}{\Delta t} (\nabla \cdot \mathbf{u}^*)$ to find the pressure field $p^{n+1}$.
-    3. **Corrector:** Update the intermediate velocity $\mathbf{u}^*$ using the new pressure gradient to find the divergence-free velocity $\mathbf{u}^{n+1}$.
-
-
+1. **Predictor:** Solve the momentum equation without the pressure gradient to find an intermediate velocity $\mathbf{u}^*$.
+2. **Poisson:** Solve the Pressure Poisson Equation $\nabla^2 p = \frac{\rho}{\Delta t} (\nabla \cdot \mathbf{u}^*)$ to find the pressure field $p^{n+1}$.
+3. **Corrector:** Update the intermediate velocity $\mathbf{u}^*$ using the new pressure gradient to find the divergence-free velocity $\mathbf{u}^{n+1}$.
 
 ---
 
@@ -45,7 +52,9 @@ To solve these Partial Differential Equations (PDEs), we use the following numer
 The following structure is the planned architecture for the solver. These are placeholders for the development phase:
 
 ```
+```
 src/
+    (TBD).py        # Future Logic: Grid generation, solver, and physics modules
     grid.py         # Grid generation and discretization
     solver.py       # Main CFD solver
     physics.py      # Physics computations and updates
@@ -55,7 +64,15 @@ examples/           # Benchmark cases (e.g., Lid-Driven Cavity)
 tests/              # Verification scripts and unit tests
 docs/               # Detailed derivations and discretization notes
 ```
-@@ -62,7 +74,7 @@ We use **Virtual Environments** to ensure every club member uses the same librar
+
+---
+
+## 4. Setup and Usage
+
+### Concept: Reproducibility
+We use **Virtual Environments** to ensure every club member uses the same library versions, preventing "dependency hell" across different operating systems.
+
+### Execution: Installation
 
 **1. Clone the Repository:**
 ```bash
@@ -63,7 +80,22 @@ git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
 
-@@ -85,21 +97,39 @@ pip install -r requirements.txt
+**2. Create and Activate Virtual Environment:**
+```bash
+# Create the environment
+python -m venv venv
+
+# Activate (Windows)
+venv\Scripts\activate
+
+# Activate (Mac/Linux)
+source venv/bin/activate
+```
+
+**3. Install Dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
