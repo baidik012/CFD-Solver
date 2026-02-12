@@ -52,17 +52,16 @@ To solve these Partial Differential Equations (PDEs), we use the following numer
 The following structure is the planned architecture for the solver. These are placeholders for the development phase:
 
 ```
-```
-src/
-    (TBD).py        # Future Logic: Grid generation, solver, and physics modules
-    grid.py         # Grid generation and discretization
-    solver.py       # Main CFD solver
-    physics.py      # Physics computations and updates
-    utils.py        # Utility functions
-
-examples/           # Benchmark cases (e.g., Lid-Driven Cavity)
-tests/              # Verification scripts and unit tests
-docs/               # Detailed derivations and discretization notes
+CFD-Solver/
+├── data/                 # Directory for input data files
+├── docs/                 # Documentation files
+├── src/                  # Source codes
+│   ├── main.py           # Main script to run the CFD solver
+│   └── utils.py          # Utility functions for the solver
+├── tests/                # Unit tests
+├── .gitignore            # Git ignore file
+├── README.md             # Project documentation
+└── requirements.txt      # Project dependencies
 ```
 
 ---
