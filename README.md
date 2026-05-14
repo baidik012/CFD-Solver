@@ -9,6 +9,7 @@ An internal tool for simulating incompressible fluid flow. Built by the club to 
 - [How We Solve It](#how-we-solve-it)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
+- [Quickstart Guide](QUICKSTART.md)
 - [Contributing](#contributing)
 
 ---
@@ -114,14 +115,13 @@ pip install -r requirements.txt
 ### Run a simulation
 
 ```bash
-# Basic (collocated grid)
-python examples/lid_cavity.py
-
 # Production (staggered grid, more accurate)
 python examples/staggered_cavity.py
 ```
 
 Results go to the `output/` directory.
+
+**First time?** Read the [Quickstart Guide](QUICKSTART.md) for a walkthrough of what everything means.
 
 ### Run tests
 
