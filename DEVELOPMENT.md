@@ -1,53 +1,88 @@
-# Development Setup
+# Development Guide
 
-To set up the development environment for the CFD-Solver project, please follow these steps:
+Notes on how the solver works and how to extend it.
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/baidik012/CFD-Solver.git
-   cd CFD-Solver
-   ```
+## How the Solver Is Organized
 
-2. **Install dependencies**:
-   Make sure you have Python and pip installed. Then run:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up a virtual environment** (optional but recommended):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-   ```
-
-# Running Tests
-
-To run tests, you can use the following command:
-```bash
-pytest
 ```
-Make sure to have all the required test dependencies installed as specified in `requirements.txt`.
-
-# Code Quality
-
-We follow code quality standards by using linters such as flake8. To check for code quality, run:
-```bash
-flake8 .
+src/
+├── solver.py      # Main loop: advance time, call each step
+├── step_1.py      # Predictor: solve momentum without pressure
+├── step_2.py      # Poisson: solve for pressure
+├── step_3.py      # Corrector: update velocity with pressure gradient
+├── grid.py        # Grid geometry and spacing
+├── boundary.py   # Boundary conditions
+└── utils.py      # Helpers: derivative approximations, norms
 ```
 
-# Debugging
+## Core Concepts
 
-For debugging, consider using built-in tools such as `pdb` in Python. You can set breakpoints in your code using:
+### The Grid
+
+The domain is divided into a regular mesh. Every variable (velocity, pressure) lives at grid points.
+
+- `Nx`, `Ny`: number of points in x and y
+- `dx`, `dy`: spacing between points
+- Boundaries are handled separately — interior points use the scheme
+
+### Time Stepping
+
+The main loop in `solver.py` advances from `t=0` to `t=final_time` in steps of `dt`.
+
+```
+for t in range(0, final_time, dt):
+    u_star = predictor(u, dt)
+    p = poisson(u_star, dt)
+    u = corrector(u_star, p)
+```
+
+### Boundary Conditions
+
+Where the fluid enters/exits or hits walls. Currently implemented:
+- **No-slip walls**: velocity = 0 at the boundary
+- **Periodic**: left edge flows into right edge (not implemented yet)
+- **Inlet/outlet**: specify velocity or pressure (not implemented yet)
+
+To add a new boundary type, edit `boundary.py`.
+
+## Adding a New Test Case
+
+1. Create a file in `examples/` — copy an existing one as a template
+2. Define the geometry: `grid = Grid(Lx, Ly, Nx, Ny)`
+3. Set initial conditions: `u0`, `p0`
+4. Set boundary conditions: `bc = BoundaryConditions(...)`
+5. Run the solver: `solver.solve(grid, u0, p0, bc)`
+6. Plot or save the results
+
+## Verifying Your Results
+
+A common sanity check: the divergence of the final velocity should be close to zero.
+
 ```python
-import pdb; pdb.set_trace()
+divergence = (np.gradient(u.x, dx) + np.gradient(u.y, dy))
+print(f"Max divergence: {np.max(np.abs(divergence))}")
 ```
 
-# Best Practices for Contributing Developers
+If it's not near machine epsilon (~1e-15), something's wrong in the pressure step.
 
-- **Write clear commit messages**: Use imperative mood and keep them short.
-- **Follow coding standards**: Stick to PEP 8 for Python code.
-- **Document your code**: Write docstrings and comments where necessary.
-- **Test your changes**: Ensure all tests pass before submitting a pull request.
-- **Communicate with the team**: Use issues and PR comments to discuss changes or ask for help.
+## Physics Conventions
 
-Happy coding!
+- All units are SI: meters, seconds, kg
+- Positive u is to the right, positive v is up
+- Pressure is relative — only pressure *differences* matter
+
+## Debugging
+
+If results look wrong:
+
+1. **Check the CFL condition.** `dt` must be small enough:
+   ```
+   dt < min(dx, dy) / max(|u|)
+   ```
+   Violating this makes the scheme unstable.
+
+2. **Plot intermediate steps.** Call the predictor, poisson, and corrector separately and inspect each field.
+
+3. **Reduce resolution.** Start with a coarse grid (e.g., 32x32) to see problems faster.
+
+4. **Print residuals.** The Poisson solver should converge — if it doesn't, the pressure field will be wrong.
