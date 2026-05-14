@@ -1,135 +1,124 @@
-# CFD Solver (Club Internal)
+# CFD Solver
 
-This repository contains an internal Computational Fluid Dynamics (CFD) solver developed by the club for studying numerical methods applied to incompressible fluid flow.
+An internal tool for simulating how incompressible fluids move. Built by the club to learn numerical methods and get hands-on with computational physics.
 
 ---
 
 ## Table of Contents
-- [Concept: The Physics](#1-concept-the-physics)
-- [Execution: Numerical Implementation](#2-execution-numerical-implementation)
-- [Project Structure](#3-project-structure)
-- [Setup and Usage](#4-setup-and-usage)
-- [Contribution Guidelines](#5-club-contribution-guidelines)
+- [The Physics](#the-physics)
+- [How We Solve It](#how-we-solve-it)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Contributing](#contributing)
 
 ---
 
-## 1. Concept: The Physics
-This solver is designed to simulate **Incompressible Newtonian Flows**. The logic is governed by the conservation of mass and momentum.
+## The Physics
 
-### Governing Equations
+We're solving for fluid flow that doesn't compress — water, air at low speeds, that kind of thing.
 
-**Continuity Equation (Mass Conservation):**
-Ensures the velocity field remains solenoidal (divergence-free).
+### Conservation Laws
 
+**Mass doesn't disappear:**
 $$\nabla \cdot \mathbf{u} = 0$$
 
-**Momentum Equations (Navier–Stokes):**
-Describes the balance of convective, pressure, and viscous forces.
+The velocity field has zero divergence. No fluid is appearing or vanishing.
 
+**Forces add up (Navier-Stokes):**
 $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}$$
 
-**Variables:**
-* $\mathbf{u}$: Velocity vector field
-* $p$: Pressure field
-* $\rho$: Density
-* $\nu$: Kinematic viscosity
+Fluid accelerates from pressure differences and spreads out via viscosity.
+
+| Symbol | Meaning |
+|--------|---------|
+| $\mathbf{u}$ | Velocity at each point |
+| $p$ | Pressure |
+| $\rho$ | Density |
+| $\nu$ | Kinematic viscosity |
 
 ---
 
-## 2. Execution: Numerical Implementation
-To solve these Partial Differential Equations (PDEs), we use the following numerical recipe:
+## How We Solve It
 
-* **Spatial Discretization:** Finite Difference Method (FDM) on a **Structured Cartesian Grid**.
-* **The Decoupling Strategy:** For incompressible flows, we use the **Projection Method (Chorin's Method)** to decouple the velocity and pressure fields.
-* **The Algorithm Steps:**
-1. **Predictor:** Solve the momentum equation without the pressure gradient to find an intermediate velocity $\mathbf{u}^*$.
-2. **Poisson:** Solve the Pressure Poisson Equation $\nabla^2 p = \frac{\rho}{\Delta t} (\nabla \cdot \mathbf{u}^*)$ to find the pressure field $p^{n+1}$.
-3. **Corrector:** Update the intermediate velocity $\mathbf{u}^*$ using the new pressure gradient to find the divergence-free velocity $\mathbf{u}^{n+1}$.
+We break the problem into steps a computer can handle.
+
+1. **Grid it up** — Divide space into small boxes and solve at each corner.
+2. **Guess the flow** — Solve the momentum equation ignoring pressure. We get an intermediate velocity that probably violates mass conservation.
+3. **Fix the pressure** — Solve the pressure equation to find what pressure field would make the flow divergence-free.
+4. **Correct the velocity** — Apply the pressure gradient to get the real velocity.
+5. **Repeat** — Advance in time, repeating steps 2–4 until we're done.
+
+This is the **Projection Method** (also called Chorin's Method). It sidesteps solving velocity and pressure simultaneously, which is numerically painful.
+
+| Term | What it means |
+|------|---------------|
+| FDM | Finite Difference Method — simplest way to approximate derivatives on a grid |
+| Projection | Split the problem: guess first, fix later |
+| Divergence-free | Fluid coming in must go out — no disappearing or multiplying |
 
 ---
 
-## 3. Project Structure
-The following structure is the planned architecture for the solver. These are placeholders for the development phase:
+## Project Structure
 
 ```
 CFD-Solver/
-├── data/                 # Directory for input data files
-├── docs/                 # Documentation files
-├── src/                  # Source codes
-│   ├── main.py           # Main script to run the CFD solver
-│   └── utils.py          # Utility functions for the solver
+├── src/                  # Core solver code
 ├── tests/                # Unit tests
-├── .gitignore            # Git ignore file
-├── README.md             # Project documentation
-└── requirements.txt      # Project dependencies
+├── data/                 # Input files for different cases
+├── docs/                 # Notes and derivations
+├── examples/             # Ready-to-run simulations
+├── output/                # Plots and results go here
+├── requirements.txt      # Python dependencies
+└── .gitignore
 ```
 
 ---
 
-## 4. Setup and Usage
+## Getting Started
 
-### Concept: Reproducibility
-We use **Virtual Environments** to ensure every club member uses the same library versions, preventing "dependency hell" across different operating systems.
-
-### Execution: Installation
-
-**1. Clone the Repository:**
+**1. Clone and enter the repo:**
 ```bash
 git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
 
-**2. Create and Activate Virtual Environment:**
+**2. Set up a virtual environment:**
 ```bash
-# Create the environment
 python -m venv venv
-
-# Activate (Windows)
-venv\Scripts\activate
-
-# Activate (Mac/Linux)
-source venv/bin/activate
+source venv/bin/activate      # Mac/Linux
+venv\Scripts\activate         # Windows
 ```
 
-**3. Install Dependencies:**
+**3. Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
----
+### Run a simulation
 
-### Quick Start
-Get up and running in a few minutes:
 ```bash
-# After installation, run the example
 python examples/lid_driven_cavity.py
 ```
 
-**Expected Output:** The solver will generate velocity and pressure field data for a lid-driven cavity problem. Visualizations will be saved to the `output/` directory.
+Results go to the `output/` directory — velocity fields, pressure maps, whatever the example dumps out.
 
----
-
-### Running Simulations
-**Important:** Run all commands from the **root directory** so Python correctly finds the `src/` folder and resolves internal imports.
+### Run tests
 
 ```bash
-# Run a simulation
-python examples/lid_driven_cavity.py
-
-# Run tests
-python -m pytest tests/
+pytest tests/
 ```
+
+All commands run from the root directory so Python finds the `src/` folder correctly.
 
 ---
 
-## 5. Club Contribution Guidelines
-1. **Work on Branches:** Never push directly to `main`. Use `git checkout -b feature-your-name`.
-2. **No Data in Repo:** Do not upload `.png`, `.mp4`, or large `.log` files. Use a `.gitignore` file.
-3. **Code Standards:** Ensure your code is documented and follows PEP 8 style guidelines.
-4. **Review:** Once your feature is ready, open a **Pull Request** for the club leads to review.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details on branches, code style, and the PR process.
 
 ---
 
 ## License
-This project is for **educational use only**. It is not validated for industrial or safety-critical applications.
-For licensing details, see the [LICENSE](LICENSE) file.
+
+Educational use only — this isn't validated for industrial or safety-critical applications.
+See [LICENSE](LICENSE).
