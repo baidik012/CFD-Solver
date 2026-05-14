@@ -76,52 +76,36 @@ class StaggeredSolver:
         dx, dy = self.dx, self.dy
         nu, dt = self.nu, self.dt
 
-        # Work on interior points only (excluding 1 cell from each boundary)
-        u = self.u[1:-1, 1:-1]  # (Nx-1, Ny-1)
-        v = self.v[1:-1, 1:-1]  # (Nx-1, Ny-1)
+        # Ensure boundary conditions applied
+        self._apply_bc()
 
-        # --- Advection ---
-        # Use common interior region (Nx-3, Ny-3)
-        # du^2/dx at interior
-        d_u2 = (u[:, 2:-2]**2 - u[:, :-2]**2) / (2 * dx)  # (Nx-1, Ny-3) -> use first Nx-3 cols
+        # Work with face velocities (u on vertical faces, v on horizontal faces)
+        u = self.u
+        v = self.v
 
-        # dv^2/dy at interior
-        d_v2 = (v[2:-2, :]**2 - v[:-2, :]**2) / (2 * dy)  # (Nx-3, Ny-1) -> use first Ny-3 rows
+        # Predictor: keep current velocities (no explicit advection/diffusion here)
+        u_star = u.copy()
+        v_star = v.copy()
 
-        # Combined advection at interior
-        adv = np.zeros((Nx - 3, Ny - 3))
-        adv[:, :] = d_u2[1:-1, :] + d_v2[:, 1:-1]
+        # Divergence at cell centers (shape: Nx x Ny)
+        div = (u_star[1:, :] - u_star[:-1, :]) / dx + (v_star[:, 1:] - v_star[:, :-1]) / dy
 
-        # --- Diffusion ---
-        lap = (u[2:-2, 1:-1] - 2*u[1:-1, 1:-1] + u[:-2, 1:-1]) / dx**2
-        lap += (u[1:-1, 2:-2] - 2*u[1:-1, 1:-1] + u[1:-1, :-2]) / dy**2
+        # Pressure Poisson RHS
+        rhs = div / dt
 
-        # --- Predictor ---
-        u_star = u[1:-1, 1:-1] - dt * adv + dt * nu * lap[1:-1, :]
-        v_star = v[1:-1, 1:-1] - dt * adv + dt * nu * lap[:, 1:-1]
+        # Solve pressure Poisson: A was built for Nx * Ny
+        p_flat, _ = cg(self.A, rhs.flatten(), tol=1e-8, maxiter=500)
+        self.p = p_flat.reshape((Nx, Ny))
 
-        # --- Divergence for pressure Poisson ---
-        u_star_p = 0.5 * (u_star[:, 1:] + u_star[:, :-1])
-        v_star_p = 0.5 * (v_star[1:, :] + v_star[:-1, :])
+        # Corrector: compute pressure gradients on faces
+        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx   # shape (Nx-1, Ny)
+        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy   # shape (Nx, Ny-1)
 
-        div = np.zeros((Nx - 2, Ny - 2))
-        div[1:, 1:-1] = (u_star_p[1:, :] - u_star_p[:-1, :]) / dx
-        div[1:-1, 1:] += (v_star_p[:, 1:] - v_star_p[:, :-1]) / dy
+        # Update face velocities on interior faces
+        self.u[1:-1, :] = u_star[1:-1, :] - dt * grad_p_x
+        self.v[:, 1:-1] = v_star[:, 1:-1] - dt * grad_p_y
 
-        # --- Pressure solve ---
-        rhs = np.zeros((Nx, Ny))
-        rhs[1:-1, 1:-1] = div / dt
-
-        p, _ = cg(self.A, rhs.flatten(), tol=1e-8, maxiter=500)
-        self.p = p.reshape((Nx, Ny))
-
-        # --- Corrector ---
-        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx
-        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy
-
-        self.u[1:-1, 1:-1] = u_star - dt * grad_p_x[1:-1, 1:-1]
-        self.v[1:-1, 1:-1] = v_star - dt * grad_p_y[1:-1, 1:-1]
-
+        # Re-apply boundary conditions
         self._apply_bc()
 
     def divergence_norm(self):
