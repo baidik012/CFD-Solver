@@ -1,0 +1,13 @@
+geometry:
+  Lx: 2.0
+  Ly: 2.0
+  Nx: 96
+  Ny: 96
+
+nu: 0.001
+dt: 0.0001
+steps: 800
+
+boundary:
+  inlet: {u: 0.5, v: 0.0}
+  walls: {u: 0.0, v: 0.0}
