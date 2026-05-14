@@ -1,6 +1,6 @@
 # CFD Solver
 
-An internal tool for simulating how incompressible fluids move. Built by the club to learn numerical methods and get hands-on with computational physics.
+An internal tool for simulating incompressible fluid flow. Built by the club to learn numerical methods and get hands-on with computational physics.
 
 ---
 
@@ -22,7 +22,7 @@ We're solving for fluid flow that doesn't compress — water, air at low speeds,
 **Mass doesn't disappear:**
 $$\nabla \cdot \mathbf{u} = 0$$
 
-The velocity field has zero divergence. No fluid is appearing or vanishing.
+No fluid appears or vanishes. The velocity field is divergence-free.
 
 **Forces add up (Navier-Stokes):**
 $$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\frac{1}{\rho} \nabla p + \nu \nabla^2 \mathbf{u}$$
@@ -31,7 +31,7 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 | Symbol | Meaning |
 |--------|---------|
-| $\mathbf{u}$ | Velocity at each point |
+| $\mathbf{u}$ | Velocity (u for x-direction, v for y-direction) |
 | $p$ | Pressure |
 | $\rho$ | Density |
 | $\nu$ | Kinematic viscosity |
@@ -40,21 +40,31 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 ## How We Solve It
 
-We break the problem into steps a computer can handle.
+**Chorin Projection Method** — split the problem into predictor/corrector steps:
 
-1. **Grid it up** — Divide space into small boxes and solve at each corner.
-2. **Guess the flow** — Solve the momentum equation ignoring pressure. We get an intermediate velocity that probably violates mass conservation.
-3. **Fix the pressure** — Solve the pressure equation to find what pressure field would make the flow divergence-free.
-4. **Correct the velocity** — Apply the pressure gradient to get the real velocity.
-5. **Repeat** — Advance in time, repeating steps 2–4 until we're done.
+1. **Predictor** — Guess the velocity ignoring pressure:
+   $$u^* = u^n - \Delta t(u \cdot \nabla)u + \Delta t \cdot \nu \nabla^2 u$$
 
-This is the **Projection Method** (also called Chorin's Method). It sidesteps solving velocity and pressure simultaneously, which is numerically painful.
+2. **Poisson** — Find the pressure that makes the flow divergence-free:
+   $$\nabla^2 p = \frac{\nabla \cdot u^*}{\Delta t}$$
+
+3. **Corrector** — Apply pressure gradient to get the real velocity:
+   $$u^{n+1} = u^* - \Delta t \nabla p$$
+
+**Staggered Grid (Arakawa C-grid)** — velocities at cell faces, pressure at centers. This eliminates the pressure oscillations that plague simpler grids.
+
+**Numerical schemes:**
+- Advection: QUICK (3rd order)
+- Diffusion: 2nd order central difference
+- Time: Adams-Bashforth (2nd order)
+- Pressure: Conjugate gradient with sparse matrix
 
 | Term | What it means |
 |------|---------------|
-| FDM | Finite Difference Method — simplest way to approximate derivatives on a grid |
-| Projection | Split the problem: guess first, fix later |
-| Divergence-free | Fluid coming in must go out — no disappearing or multiplying |
+| C-grid | Staggered arrangement: u/v at faces, p at centers |
+| Projection | Guess first, fix the pressure later |
+| Divergence-free | Fluid coming in must go out |
+| QUICK | Better accuracy than upwind, doesn't overshoot |
 
 ---
 
@@ -62,14 +72,21 @@ This is the **Projection Method** (also called Chorin's Method). It sidesteps so
 
 ```
 CFD-Solver/
-├── src/                  # Core solver code
-├── tests/                # Unit tests
-├── data/                 # Input files for different cases
-├── docs/                 # Notes and derivations
-├── examples/             # Ready-to-run simulations
-├── output/                # Plots and results go here
-├── requirements.txt      # Python dependencies
-└── .gitignore
+├── src/cfd_solver/         # The solver package
+│   ├── solver/             # Core modules
+│   │   ├── grid.py         # Staggered C-grid
+│   │   ├── staggered_solver.py  # Production solver
+│   │   ├── solver.py       # Simple solver (for learning)
+│   │   ├── boundaries.py   # Boundary conditions
+│   │   └── viz.py          # Plotting
+│   └── cli/                # Command-line interface
+├── examples/                # Ready-to-run simulations
+│   ├── lid_cavity.py       # Basic example
+│   └── staggered_cavity.py # Production example
+├── output/                  # Results and plots
+├── tests/                   # Unit tests
+├── pyproject.toml          # Package configuration
+└── requirements.txt        # Dependencies
 ```
 
 ---
@@ -97,10 +114,14 @@ pip install -r requirements.txt
 ### Run a simulation
 
 ```bash
-python examples/lid_driven_cavity.py
+# Basic (collocated grid)
+python examples/lid_cavity.py
+
+# Production (staggered grid, more accurate)
+python examples/staggered_cavity.py
 ```
 
-Results go to the `output/` directory — velocity fields, pressure maps, whatever the example dumps out.
+Results go to the `output/` directory.
 
 ### Run tests
 
@@ -108,7 +129,7 @@ Results go to the `output/` directory — velocity fields, pressure maps, whatev
 pytest tests/
 ```
 
-All commands run from the root directory so Python finds the `src/` folder correctly.
+All commands run from the root directory.
 
 ---
 
@@ -120,5 +141,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details on branches, code style, and 
 
 ## License
 
-Educational use only — this isn't validated for industrial or safety-critical applications.
+Educational use only — not validated for industrial or safety-critical applications.
 See [LICENSE](LICENSE).
