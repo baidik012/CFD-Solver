@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cfd-solver"
+version = "0.1.0"
+description = "Incompressible fluid flow solver using Chorin's projection method"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==1.24.0",
+    "matplotlib==3.7.0",
+    "scipy==1.10.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+cfd = "cfd_solver.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
