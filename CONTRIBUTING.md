@@ -1,33 +1,47 @@
-# Contributing to CFD-Solver
+# Contributing
 
-Thank you for considering contributing to the CFD-Solver project! To help us maintain a high-quality codebase, please adhere to the following guidelines:
+Here's how we work together on this project.
 
-## Contribution Guidelines
+## Making Changes
 
-### 1. Coding Standards
-- Follow the coding style used in the project consistently. 
-- Use meaningful variable and function names.
-- Write comments and documentation where necessary. 
-- Keep lines of code to a reasonable length (preferably under 80-120 characters).
+1. **Branch first.** Never push straight to `main`.
+   ```bash
+   git checkout -b feature/what-youre-fixing
+   ```
 
-### 2. Git Workflow
-- Fork the repository and clone it to your local machine.
-- Create a new branch for your changes: `git checkout -b feature/your-feature-name`
-- Commit your changes with clear, concise commit messages.
-- Push your changes to your fork: `git push origin feature/your-feature-name`
+2. **Write the code.** Keep it readable. If it's not obvious what something does, add a comment.
 
-### 3. Pull Request (PR) Review Process
-- Once you've pushed your changes, open a Pull Request against the `main` branch of the original repository.
-- Provide a clear description of the changes made and reference any relevant issues.
-- Be responsive to feedback and be prepared to make further changes based on review comments.
+3. **Test it.** Run `pytest tests/` before you open a PR.
 
-### 4. Testing Requirements
-- Ensure that any new features or bug fixes are covered by appropriate tests.
-- Run the test suite and confirm all tests pass before submitting your PR.
-- Provide information on how to run tests if necessary.
+4. **Commit.** Write a short message explaining *what* changed and *why*.
+   ```bash
+   git commit -m "Add channel flow boundary conditions"
+   ```
 
-### 5. Code of Conduct
-- Please treat everyone with respect and courtesy.
-- Avoid offensive or disparaging language in discussions. 
+5. **Push and open a PR.**
+   ```bash
+   git push origin feature/what-youre-fixing
+   ```
 
-By following these guidelines, you help create a welcoming and productive environment for all contributors. Thank you for your contributions!
+## Code Style
+
+- Follow PEP 8. If your linter complains, fix it.
+- Use meaningful names. `velocity` is better than `v`. `pressure_poisson_rhs` is better than `pr`.
+- No magic numbers. If you're using `0.5` in three places, make it a constant with a name.
+
+## What to Include in a PR
+
+- A clear description of what changed
+- Link to any related issues
+- A screenshot or plot if you added visualization
+- A note on how you tested it
+
+## What We Don't Want
+
+- `.png`, `.mp4`, or large `.log` files — those go in `output/`, not the repo
+- Commented-out code that "might be useful later"
+- Pull requests that touch 15 unrelated things at once
+
+## Questions?
+
+Open an issue. We're a small club — someone will get back to you.
