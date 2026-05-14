@@ -6,15 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
-    """Save a quiver plot of the velocity field.
-
-    Parameters:
-    - grid: Grid object with X/Y (cell-center) coordinates
-    - u, v: velocity arrays (same shape)
-    - path: output filepath
-    - skip: integer stride for plotting (if None, chosen from grid size)
-    - scale: quiver scale passed to matplotlib.quiver (optional)
-    """
+    """Save a quiver plot of the velocity field."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     if skip is None:
@@ -25,7 +17,6 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
 
     fig, ax = plt.subplots(figsize=(6, 5))
 
-    # Prefer cell-center coordinates; Grid provides X, Y properties
     X = getattr(grid, 'X', None)
     Y = getattr(grid, 'Y', None)
 
@@ -33,7 +24,6 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
         Xp = X[::skip, ::skip]
         Yp = Y[::skip, ::skip]
     else:
-        # Fall back to array indices scaled by grid spacing if available
         xi = np.arange(u.shape[0])
         yi = np.arange(u.shape[1])
         Xidx, Yidx = np.meshgrid(xi, yi)
@@ -44,7 +34,6 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
 
     q = ax.quiver(Xp, Yp, U, V, color='black', alpha=0.6, scale=scale)
 
-    # Label axes with physical units when grid provided
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
     ax.set_title("Velocity Field (quiver)")
@@ -55,30 +44,24 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
     print(f"Saved {path}")
 
 
-def save_velocity_contour(solver, path, skip=None, scale=None):
+def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     """Save pressure contours and velocity vectors for staggered solver.
 
     Parameters:
-    - solver: StaggeredSolver instance
-    - path: output filepath
-    - skip: integer stride for plotting (optional)
-    - scale: quiver scale passed to matplotlib.quiver (optional)
+    - cell_mask: optional (Nx, Ny) bool array where True=fluid, False=solid
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     Nx, Ny = solver.Nx, solver.Ny
     Lx, Ly = solver.Lx, solver.Ly
 
-    # Interpolate u and v to cell centers for plotting
     u_center = 0.5 * (solver.u[1:, :] + solver.u[:-1, :])
     v_center = 0.5 * (solver.v[:, 1:] + solver.v[:, :-1])
 
-    # Cell center coordinates
     x = np.linspace(0, Lx, Nx)
     y = np.linspace(0, Ly, Ny)
     X, Y = np.meshgrid(x, y)
 
-    # Velocity magnitude
     speed = np.sqrt(u_center**2 + v_center**2)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -91,6 +74,14 @@ def save_velocity_contour(solver, path, skip=None, scale=None):
     ax.set_title("Pressure Field")
     ax.set_aspect("equal")
     plt.colorbar(cf, ax=ax, label="p")
+    
+    # If mask provided, overlay solid regions with gray hatch
+    if cell_mask is not None:
+        x_cell = np.linspace(0, Lx, Nx)
+        y_cell = np.linspace(0, Ly, Ny)
+        X_cell, Y_cell = np.meshgrid(x_cell, y_cell)
+        solid_mask = (~cell_mask).astype(float)
+        ax.contourf(X_cell, Y_cell, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
 
     # Velocity field
     ax = axes[1]
@@ -105,6 +96,11 @@ def save_velocity_contour(solver, path, skip=None, scale=None):
     ax.set_title("Velocity Magnitude")
     ax.set_aspect("equal")
     plt.colorbar(cf, ax=ax, label="|u|")
+    
+    # If mask provided, overlay solid regions with gray
+    if cell_mask is not None:
+        solid_mask = (~cell_mask).astype(float)
+        ax.contourf(X_cell, Y_cell, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
 
     plt.tight_layout()
     plt.savefig(path)

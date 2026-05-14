@@ -84,10 +84,8 @@ def main():
             print(f"Step {n}: max |∇·u| = {solver.max_divergence():.3e}")
 
     os.makedirs('output', exist_ok=True)
-    plot_cfg = cfg.get('plot', {})
-    skip = plot_cfg.get('skip', None)
-    scale = plot_cfg.get('scale', None)
-    save_velocity_contour(solver, 'output/t_pipe.png', skip=skip, scale=scale)
+    # pass cell_mask so the plot omits solids
+    save_velocity_contour(solver, 'output/t_pipe.png', cell_mask=cell_mask)
     print('Saved output/t_pipe.png')
 
 
