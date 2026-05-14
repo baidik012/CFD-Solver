@@ -83,19 +83,45 @@ class StaggeredSolver:
         u = self.u
         v = self.v
 
-        # Predictor: keep current velocities (no explicit advection/diffusion here)
+        # Predictor: keep current velocities and add viscous diffusion (explicit)
         u_star = u.copy()
         v_star = v.copy()
+
+        # Viscous diffusion (centered second differences)
+        # u: shape (Nx+1, Ny) - apply diffusion to interior faces i=1..Nx-1
+        lap_u = np.zeros_like(u)
+        # second derivative in x (interior faces i=1..Nx-1)
+        lap_u_x = (u[2:, :] - 2*u[1:-1, :] + u[:-2, :]) / dx**2
+        # second derivative in y: only for interior j=1..Ny-2
+        lap_u_y = np.zeros_like(lap_u_x)
+        if u.shape[1] > 2:
+            lap_u_y[:, 1:-1] = (u[1:-1, 2:] - 2*u[1:-1, 1:-1] + u[1:-1, :-2]) / dy**2
+        lap_u[1:-1, :] = lap_u_x + lap_u_y
+        u_star[1:-1, :] += nu * dt * lap_u[1:-1, :]
+
+        # v: shape (Nx, Ny+1) - apply diffusion to interior faces j=1..Ny-1 and i=1..Nx-2
+        lap_v = np.zeros_like(v)
+        # interior in x is 1:-1 (i=1..Nx-2), interior in y is 1:-1 (j=1..Ny-1)
+        if v.shape[0] > 2 and v.shape[1] > 2:
+            lap_v[1:-1, 1:-1] = (
+                (v[2:, 1:-1] - 2*v[1:-1, 1:-1] + v[:-2, 1:-1]) / dx**2 +
+                (v[1:-1, 2:] - 2*v[1:-1, 1:-1] + v[1:-1, :-2]) / dy**2
+            )
+            v_star[1:-1, 1:-1] += nu * dt * lap_v[1:-1, 1:-1]
 
         # Divergence at cell centers (shape: Nx x Ny)
         div = (u_star[1:, :] - u_star[:-1, :]) / dx + (v_star[:, 1:] - v_star[:, :-1]) / dy
 
-        # Pressure Poisson RHS
-        rhs = div / dt
+        # Pressure Poisson RHS (sign convention)
+        rhs = -div / dt
 
         # Solve pressure Poisson: A was built for Nx * Ny
-        p_flat, _ = cg(self.A, rhs.flatten(), tol=1e-8, maxiter=500)
+        p_flat, info = cg(self.A, rhs.flatten())
+        if info != 0:
+            raise RuntimeError(f"CG solver failed to converge (info={info})")
         self.p = p_flat.reshape((Nx, Ny))
+        # Enforce zero-mean pressure to remove nullspace
+        self.p -= np.mean(self.p)
 
         # Corrector: compute pressure gradients on faces
         grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx   # shape (Nx-1, Ny)
@@ -109,17 +135,13 @@ class StaggeredSolver:
         self._apply_bc()
 
     def divergence_norm(self):
-        u = self.u[1:-1, 1:-1]
-        v = self.v[1:-1, 1:-1]
-        div = (u[:, 2:] - u[:, :-2]) / (2 * self.dx)
-        div += (v[2:, :] - v[:-2, :]) / (2 * self.dy)
+        # compute divergence at cell centers using face velocities (shape: Nx x Ny)
+        div = (self.u[1:, :] - self.u[:-1, :]) / self.dx + (self.v[:, 1:] - self.v[:, :-1]) / self.dy
         return np.sqrt(np.mean(div**2))
 
     def max_divergence(self):
-        u = self.u[1:-1, 1:-1]
-        v = self.v[1:-1, 1:-1]
-        div = (u[:, 2:] - u[:, :-2]) / (2 * self.dx)
-        div += (v[2:, :] - v[:-2, :]) / (2 * self.dy)
+        # compute divergence at cell centers using face velocities (shape: Nx x Ny)
+        div = (self.u[1:, :] - self.u[:-1, :]) / self.dx + (self.v[:, 1:] - self.v[:, :-1]) / self.dy
         return np.max(np.abs(div))
 
     def cfl(self):

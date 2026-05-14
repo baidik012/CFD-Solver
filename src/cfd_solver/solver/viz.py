@@ -12,8 +12,24 @@ def save_velocity_plot(grid, u, v, path):
     skip = max(1, grid.Nx // 32)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.quiver(grid.X[::skip, ::skip], grid.Y[::skip, ::skip],
-              u[::skip, ::skip], v[::skip, ::skip], color='black', alpha=0.6)
+    # Grid stores cell-center coordinates as Xc, Yc (shape: Ny x Nx). Transpose
+    # them to match velocity array shapes (Nx x Ny) used elsewhere.
+    X = getattr(grid, 'Xc', None)
+    Y = getattr(grid, 'Yc', None)
+    if X is None or Y is None:
+        # Fall back to attributes X, Y if present
+        X = getattr(grid, 'X', None)
+        Y = getattr(grid, 'Y', None)
+    if X is not None and Y is not None:
+        ax.quiver(X.T[::skip, ::skip], Y.T[::skip, ::skip],
+                  u[::skip, ::skip], v[::skip, ::skip], color='black', alpha=0.6)
+    else:
+        # Last resort: plot with array indices
+        xi = np.arange(u.shape[0])
+        yi = np.arange(u.shape[1])
+        Xidx, Yidx = np.meshgrid(xi, yi)
+        ax.quiver(Xidx[::skip, ::skip], Yidx[::skip, ::skip],
+                  u[::skip, ::skip], v[::skip, ::skip], color='black', alpha=0.6)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title("Velocity Field")

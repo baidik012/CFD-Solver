@@ -38,11 +38,9 @@ class Solver:
 
     def _laplacian(self, u, dx, dy):
         """Compute Laplacian using central differences."""
-        lap = (
-            np.roll(u, 1, axis=1) + np.roll(u, -1, axis=1) +
-            np.roll(u, 1, axis=0) + np.roll(u, -1, axis=0) - 4*u
-        ) / (dx**2)
-        return lap
+        lap_x = (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / (dx**2)
+        lap_y = (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / (dy**2)
+        return lap_x + lap_y
 
     def step(self):
         """Advance one time step."""

@@ -50,3 +50,22 @@ class Grid:
     def shape_p(self):
         """Pressure shape (Nx, Ny)."""
         return (self.Nx, self.Ny)
+    @property
+    def X(self):
+        """Cell-center X coordinates transposed to match array shapes (Nx x Ny)."""
+        return self.Xc.T
+
+    @property
+    def Y(self):
+        """Cell-center Y coordinates transposed to match array shapes (Nx x Ny)."""
+        return self.Yc.T
+
+    @property
+    def Xf_T(self):
+        """Face X coordinates (transposed)."""
+        return self.Xf.T
+
+    @property
+    def Yf_T(self):
+        """Face Y coordinates (transposed)."""
+        return self.Yf.T
