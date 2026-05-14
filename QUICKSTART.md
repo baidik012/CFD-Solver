@@ -1,24 +1,157 @@
-# Quickstart Guide
+# Complete Beginner's Guide
 
-For club members getting started with the solver.
-
----
-
-## What is this?
-
-A tool that simulates fluid flowing through a space. You describe the box, set how fast the fluid moves at the walls, and the solver figures out what happens inside.
-
-**Common use case:** The "lid-driven cavity" — a square box with a moving lid. The fluid gets dragged along by the lid and swirls around. It's the "Hello World" of fluid simulation.
+From having nothing installed to running your first simulation.
 
 ---
 
-## Run Your First Simulation
+## Part 1: Install the Tools
+
+### 1.1 Install Python
+
+**Windows:**
+1. Go to [python.org/downloads](https://python.org/downloads)
+2. Download the latest Python 3.x (green button)
+3. Run the installer
+4. **IMPORTANT:** Check "Add Python to PATH" before clicking Install
+5. Click "Install Now"
+
+**Mac:**
+```bash
+# If you have Homebrew (recommended)
+brew install python3
+
+# Or download from python.org/downloads
+```
+
+**Linux:**
+```bash
+sudo apt update
+sudo apt install python3 python3-pip
+```
+
+**To verify Python installed:**
+```bash
+python --version
+# Should show: Python 3.10.x or newer
+```
+
+---
+
+### 1.2 Install Git
+
+**Windows:**
+1. Go to [git-scm.com/download/win](https://git-scm.com/download/win)
+2. Download and run the installer
+3. Use all default options (Next, Next, Next...)
+4. Select "Git Bash Here" context menu option if asked
+
+**Mac:**
+```bash
+# Usually already installed, verify:
+git --version
+
+# If not, install via:
+xcode-select --install
+```
+
+**Linux:**
+```bash
+sudo apt install git
+```
+
+---
+
+## Part 2: Get the Code
+
+### 2.1 Open Your Terminal
+
+**Windows:** Press `Win + R`, type `cmd`, press Enter. Then type `git bash` and press Enter.
+
+**Mac:** Press `Cmd + Space`, type `Terminal`, press Enter.
+
+**Linux:** Press `Ctrl + Alt + T`.
+
+---
+
+### 2.2 Clone the Repo
+
+If the repo is **public** (recommended):
+```bash
+git clone https://github.com/baidik012/CFD-Solver.git
+cd CFD-Solver
+```
+
+If the repo is **private** (you were added as collaborator):
+```bash
+git clone https://github.com/baidik012/CFD-Solver.git
+cd CFD-Solver
+# GitHub will ask for your username and password
+# Use your GitHub username and a Personal Access Token as password
+```
+
+**To create a Personal Access Token:**
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
+2. Click "Generate new token (classic)"
+3. Name it something like "CFD Solver"
+4. Check **repo** scope
+5. Click Generate
+6. Copy the token — you won't see it again
+
+When GitHub asks for password, use:
+- Username: your GitHub username
+- Password: the token (it looks like `ghp_xxxxxxxxxxxxxxxxxxxx`)
+
+---
+
+## Part 3: Set Up the Environment
+
+### 3.1 Create a Virtual Environment
+
+A virtual environment keeps this project's dependencies separate from other Python projects. Don't skip this.
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+# From the CFD-Solver directory
+python -m venv venv
+```
 
-# 2. Run the example
+This creates a folder called `venv` that contains its own Python installation.
+
+---
+
+### 3.2 Activate the Environment
+
+**Windows:**
+```bash
+venv\Scripts\activate
+```
+
+**Mac/Linux:**
+```bash
+source venv/bin/activate
+```
+
+You'll know it's active when your prompt shows `(venv)` at the start, like:
+```
+(venv) baidik@MSI:~/CFD-Solver$
+```
+
+---
+
+### 3.3 Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+This installs numpy, matplotlib, scipy, etc. — everything the solver needs.
+
+---
+
+## Part 4: Run the Solver
+
+### 4.1 Run the Example
+
+```bash
 python examples/staggered_cavity.py
 ```
 
@@ -29,106 +162,133 @@ Lid-driven cavity: 128x128 grid, 1000 steps
 Step    0: |∇·u|∞ = 5.12e-03, CFL = 0.012
 Step  100: |∇·u|∞ = 4.21e-04, CFL = 0.089
 ...
-Step  900: |∇·u|∞ = 1.33e-06, CFL = 0.152
+Step 1000: |∇·u|∞ = 1.33e-06, CFL = 0.152
+Solve time: 0.87s
+Saved output/staggered_result.png
 ```
 
-After it finishes, check `output/staggered_result.png` for the visualization.
+It takes a few seconds. Let it finish.
 
 ---
 
-## What Just Happened
+### 4.2 View the Results
 
-The solver ran 1000 time steps. Each step advances the simulation by `dt = 0.001` seconds, so you're simulating 1 second of fluid flow.
+Open the file `output/staggered_result.png`:
+- **Windows:** Double-click it in File Explorer
+- **Mac:** Double-click in Finder
+- **Linux:** Double-click in Files app
 
-**Divergence (`|∇·u|∞`)** — Should get smaller as the simulation runs. It's a measure of how "wrong" the velocity field is. By step 900 it's near zero, meaning mass conservation is satisfied.
-
-**CFL** — A stability check. As long as it's less than 1, the simulation is stable.
+You should see two plots:
+- **Left:** Pressure field (red = high, blue = low)
+- **Right:** Velocity magnitude with arrows showing flow direction
 
 ---
 
-## Parameters Explained
+## Part 5: Experiment
 
-When you look at `examples/staggered_cavity.py`, you'll see:
+### 5.1 Change the Parameters
+
+Open `examples/staggered_cavity.py` in a text editor (VS Code, Notepad++, etc.) and change values:
 
 ```python
-Nx, Ny = 128, 128  # Grid resolution
-nu = 0.01          # Viscosity
-dt = 0.001         # Time step
-steps = 1000       # Number of steps
+Nx, Ny = 128, 128  # Try 64 or 256
+nu = 0.01          # Try 0.001 (thinner) or 0.1 (thicker)
+dt = 0.001         # Try 0.0005 (more stable) or 0.002 (faster but risky)
+steps = 1000       # Try 500 (quicker) or 2000 (more settled)
 ```
 
-**What to change:**
+Save the file and run again.
 
-| Parameter | Effect | Too small | Too large |
-|-----------|--------|-----------|-----------|
-| `Nx, Ny` | Detail in results | Blurry | Slow |
-| `nu` | "Thickness" of fluid | Unstable | Over-damped |
-| `dt` | Speed of simulation | Slow | Unstable |
-| `steps` | How long to simulate | Not enough time | Wasted time |
+---
 
-**Typical starting values for lid-driven cavity:**
-```
-Nx, Ny: 64-256 (128 is good for learning)
-nu: 0.01 (water-like)
-dt: 0.001
-steps: 500-2000
+### 5.2 What to Try
+
+**Faster lid (more turbulent):**
+Change `u_bc={"top": 1.0}` to `"top": 2.0`
+
+**Lower viscosity (more chaotic):**
+Change `nu=0.01` to `nu=0.001`
+
+**Higher resolution (more detail, slower):**
+Change `Nx, Ny = 128, 128` to `Nx, Ny = 256, 256`
+
+---
+
+## Troubleshooting
+
+### "python not found" or "python is not recognized"
+
+Python isn't in your PATH. Reinstall Python and check "Add Python to PATH".
+
+---
+
+### "pip not found"
+
+Run this:
+```bash
+python -m pip install -r requirements.txt
 ```
 
 ---
 
-## Reading the Output
+### "No module named 'cfd_solver'"
 
-After running, check `output/staggered_result.png`. It shows:
+Make sure you're in the `CFD-Solver` directory and the virtual environment is activated. Your prompt should show `(venv)`.
 
-**Left plot (Pressure):** High and low pressure zones in the fluid. Red = high, blue = low. The pressure field drives the flow correction.
-
-**Right plot (Velocity):** Color shows speed, arrows show direction. You'll see:
-- Fast fluid near the moving lid (top)
-- Slow fluid in corners (stagnation zones)
-- A main vortex in the center
+Run `pwd` to check your current directory. It should end with `CFD-Solver`.
 
 ---
 
-## Is My Answer Correct?
+### Import error or missing package
 
-The lid-driven cavity is a classic problem with published reference data (Ghia et al., 1982). If you're getting wrong answers:
+Deactivate and re-create the environment:
+```bash
+deactivate
+rm -rf venv          # Windows: rmdir /s /q venv
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-1. **Did divergence drop to near zero?** If not, something's broken.
-2. **Is CFL < 1?** If not, reduce `dt`.
-3. **Are velocities reasonable?** Lid speed is 1.0, so max velocity should be around 0.5-0.8 (the fluid doesn't reach lid speed everywhere).
+---
+
+### "Permission denied" or "cannot push"
+
+You're trying to push changes but don't have write access. That's fine — you can still run the solver and experiment locally. If you want to contribute, ask the repo owner to add you as a collaborator.
+
+---
+
+### Everything else
+
+1. Make sure the virtual environment is active (prompt shows `(venv)`)
+2. Make sure you're in the `CFD-Solver` folder
+3. Try the full re-setup above
+
+Still stuck? Open an issue on GitHub with the error message.
 
 ---
 
 ## What's Next?
 
-1. **Change the lid speed** — Edit `u_bc={"top": 1.0}` to `"top": 2.0`. Watch the flow speed up.
+Once you've run a few experiments:
 
-2. **Change viscosity** — Edit `nu=0.001` for "thinner" fluid. You'll need to reduce `dt` to stay stable.
-
-3. **Increase resolution** — Change `Nx, Ny = 256, 256`. More detail, but slower.
-
-4. **Run for longer** — Increase `steps`. The flow starts chaotic but settles into a steady state after enough time.
-
----
-
-## Common Errors
-
-**`CFL > 1, simulation diverged`**
-```
-dt too large. Reduce it to 0.0005 or smaller.
-```
-
-**`Max divergence stays large`**
-```
-Something's wrong with the pressure solver or boundary conditions.
-Check that the grid dimensions are correct.
-```
-
-**`ImportError: No module named 'cfd_solver'`**
-```
-Make sure you're running from the repo root directory.
-```
+1. Read [DEVELOPMENT.md](DEVELOPMENT.md) to understand how the solver works
+2. Look at the code in `src/cfd_solver/solver/` — it's meant to be readable
+3. Try adding a new parameter or boundary condition
+4. Run the divergence check — it should be near zero if things are working
 
 ---
 
-Questions? Open an issue or ask in the club channel.
+**Quick reference for next time:**
+
+```bash
+# Activate environment
+source venv/bin/activate        # Mac/Linux
+# venv\Scripts\activate         # Windows
+
+# Run solver
+python examples/staggered_cavity.py
+
+# View results
+# Open output/staggered_result.png
+```
