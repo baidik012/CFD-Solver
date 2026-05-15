@@ -1,29 +1,26 @@
+```
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Virtual environment
-venv/
-.venv/
-
-# Simulation outputs — large files, don't track
-*.dat
-*.out
-*.vtu
-*.vti
+# Images (not typically ignored, but these appear to be output files)
 output/
-results/
-temp_plots/
-
-# Jupyter notebooks
-.ipynb_checkpoints/
-
-# Editor folders (uncomment if you use these)
-/.vscode/
-/.idea/
-
-# OS noise
-.DS_Store
-Thumbs.db
+```

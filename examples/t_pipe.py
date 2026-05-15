@@ -51,10 +51,11 @@ def main():
     cell_mask = np.zeros((Nx, Ny), dtype=bool)
     center_y = Ny // 2
     half_h = max(2, Ny // 16)
-    cell_mask[:Nx//2, center_y-half_h:center_y+half_h] = True
+    cell_mask[:Nx//2, center_y-half_h:center_y+half_h] = True  # horizontal inlet (left)
     branch_width = max(2, Nx // 32)
-    cell_mask[Nx//2 - branch_width:Nx//2 + branch_width, center_y:Ny] = True
-    cell_mask[Nx//2:Nx, center_y: center_y + (Ny//2)] = True
+    # FIX: branch must extend down to connect to full pipe height
+    cell_mask[Nx//2 - branch_width:Nx//2 + branch_width, center_y-half_h:Ny] = True  # vertical branch (up)
+    cell_mask[Nx//2:Nx, center_y-half_h:center_y+half_h] = True  # horizontal outlet (right)
 
     # Face masks
     u_mask = np.zeros((Nx+1, Ny), dtype=bool)
