@@ -22,20 +22,35 @@ class Solver:
         bc.apply(self.u, self.v)
 
     def _advection(self, u, v, dx, dy):
-        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and 
-        (u*dv/dx + v*dv/dy) for v-momentum."""
+        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and
+        (u*dv/dx + v*dv/dy) for v-momentum at cell centers.
+
+        On a staggered grid, u is at x-faces (Nx+1, Ny) and v is at y-faces (Nx, Ny+1).
+        Advection must be computed at cell centers, requiring interpolation from faces.
+
+        The interior update range is [1:-1, 1:-1] which corresponds to faces at indices 1 to Nx-1.
+        Velocity components are interpolated to cell centers by averaging adjacent face values.
+        """
         Nx, Ny = self.grid.Nx, self.grid.Ny
 
-        # Compute derivatives at cell centers [1:-1, 1:-1]
-        # For u-momentum: u*du/dx + v*du/dy
-        dudx = (u[2:, 1:-1] - u[:-2, 1:-1]) / (2 * dx)  # ∂u/∂x
-        dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)  # ∂u/∂y
-        advection_u = u[1:-1, 1:-1] * dudx + v[1:-1, 1:-1] * dudy
+        # Compute velocity derivatives at interior cell centers
+        # These use centered differences and have shape (Nx-1, Ny-2)
+        dudx = (u[2:, 1:-1] - u[:-2, 1:-1]) / (2 * dx)
+        dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)
+        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)
+        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)
 
-        # For v-momentum: u*dv/dx + v*dv/dy
-        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)  # ∂v/∂x
-        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # ∂v/∂y
-        advection_v = u[1:-1, 1:-1] * dvdx + v[1:-1, 1:-1] * dvdy
+        # Interpolate face velocities to cell centers for the convection velocities
+        # For u-momentum: u at cell center (for u*du/dx) is average of adjacent u-faces
+        # v at cell center (for v*du/dy) is average of adjacent v-faces in y
+        u_center = 0.5 * (u[1:-1, 1:-1] + u[2:, 1:-1])   # shape (Nx-1, Ny-2)
+        v_center_for_u = 0.5 * (v[:-1, 1:-1] + v[1:, 1:-1])  # shape (Nx-1, Ny-2)
+        advection_u = u_center * dudx + v_center_for_u * dudy
+
+        # For v-momentum: u at cell center (for u*dv/dx), v at cell center (for v*dv/dy)
+        u_center_for_v = 0.5 * (u[1:-1, 1:-1] + u[2:, 1:-1])  # shape (Nx-1, Ny-2)
+        v_center = 0.5 * (v[1:-1, 1:-1] + v[1:-1, 2:])  # Note: differs due to v's y-face position
+        advection_v = u_center_for_v * dvdx + v_center * dvdy
 
         return advection_u, advection_v
 
