@@ -162,16 +162,28 @@ class Solver:
         # The RHS should be div/dt at ALL cell centers, not just interior
         rhs = div / dt
         
-        # Simple Jacobi iteration for pressure
-        for _ in range(100):
+        # SOR (Successive Over-Relaxation) for pressure with better convergence
+        # Neumann boundary conditions: dp/dn = 0 at all walls
+        omega = 1.5  # over-relaxation parameter (1 < omega < 2)
+        for _ in range(300):
+            p_old = self.p.copy()
+            # Update interior points using 5-point stencil
             p_new = self.p.copy()
-            # Update interior points only (boundary points remain zero or extrapolated)
             p_new[1:-1, 1:-1] = (
                 (self.p[2:, 1:-1] + self.p[:-2, 1:-1]) / dx**2 +
                 (self.p[1:-1, 2:] + self.p[1:-1, :-2]) / dy**2 -
                 rhs[1:-1, 1:-1]
             ) / (2 / dx**2 + 2 / dy**2)
-            self.p = p_new
+            
+            # Apply Neumann boundary conditions (zero normal derivative)
+            # Extrapolate pressure at boundaries
+            p_new[0, :] = p_new[1, :]    # left boundary
+            p_new[-1, :] = p_new[-2, :]  # right boundary
+            p_new[:, 0] = p_new[:, 1]    # bottom boundary
+            p_new[:, -1] = p_new[:, -2]  # top boundary
+            
+            # Apply SOR relaxation
+            self.p = omega * p_new + (1 - omega) * self.p
 
         # --- Corrector: apply pressure gradient ---
         # Pressure gradient at face locations
