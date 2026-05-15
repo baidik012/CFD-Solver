@@ -27,7 +27,7 @@ class Solver:
 
         On a staggered grid, u is at x-faces (Nx+1, Ny) and v is at y-faces (Nx, Ny+1).
         Advection must be computed at cell centers, requiring interpolation from faces.
-
+        """
         # For u-momentum at u-faces (i+1/2, j), interior is [1:-1, 1:-1] -> shape (Nx-1, Ny-1)
         # We need to compute advection_u with shape (Nx-1, Ny-1)
         
