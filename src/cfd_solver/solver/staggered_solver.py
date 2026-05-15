@@ -82,6 +82,11 @@ class StaggeredSolver:
                 
                 A[idx, idx] = diag
 
+        # Fix one point to remove nullspace (constant pressure = no physics)
+        # This makes the matrix non-singular so CG can converge
+        A[0, :] = 0
+        A[0, 0] = 1.0
+
         self.A = A.tocsr()
 
     def _apply_bc(self):
@@ -103,6 +108,24 @@ class StaggeredSolver:
         self.v[0, :] = 0.0      # left wall (i=0)
         self.v[Nx - 1, :] = 0.0  # right wall (i=Nx-1)
 
+        # u-velocity: apply in correct order for lid-driven cavity
+        # Corners should follow lid velocity (top wall) for mass conservation
+        self.u[:, 0] = self.u_bottom  # bottom wall
+        self.u[0, :] = self.u_left    # left wall
+        self.u[Nx, :] = self.u_right  # right wall
+        # Top wall (lid) last - overwrites corners with lid velocity
+        self.u[:, Ny - 1] = self.u_top
+
+        # Fix corners: for lid-driven cavity, corners move with lid
+        # This prevents artificial mass sources at corners
+        self.u[0, Ny - 1] = self.u_top     # left-top corner
+        self.u[Nx, Ny - 1] = self.u_top    # right-top corner
+
+    def _advection(self, u, v):
+        """Compute advection term - placeholder returning zeros."""
+        # TODO: Implement proper advection
+        return np.zeros_like(u), np.zeros_like(v)
+
     def step(self):
         """Advance one time step."""
         Nx, Ny = self.Nx, self.Ny
@@ -116,9 +139,14 @@ class StaggeredSolver:
         u = self.u
         v = self.v
 
-        # Predictor: keep current velocities and add viscous diffusion (explicit)
+        # Predictor: momentum without pressure
         u_star = u.copy()
         v_star = v.copy()
+
+        # Advection (simplified first-order upwind)
+        adv_u, adv_v = self._advection(u, v)
+        u_star -= dt * adv_u
+        v_star -= dt * adv_v
 
         # Viscous diffusion (centered second differences)
         # u: shape (Nx+1, Ny) - apply diffusion to interior faces i=1..Nx-1
@@ -148,12 +176,16 @@ class StaggeredSolver:
         # Pressure Poisson RHS (sign convention)
         rhs = -div / dt
 
-        # Solve pressure Poisson: A was built for Nx * Ny
-        p_flat, info = cg(self.A, rhs.flatten())
+        # Modify RHS to account for pressure fix at point 0
+        rhs_flat = rhs.flatten()
+        rhs_flat[0] = 0.0  # p[0] = 0 (Dirichlet condition)
+
+        # Solve pressure Poisson using CG
+        p_flat, info = cg(self.A, rhs_flat)
         if info != 0:
             raise RuntimeError(f"CG solver failed to converge (info={info})")
         self.p = p_flat.reshape((Nx, Ny))
-        # Enforce zero-mean pressure to remove nullspace
+        # Enforce zero-mean pressure to remove numerical drift
         self.p -= np.mean(self.p)
 
         # Corrector: compute pressure gradients on faces

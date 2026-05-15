@@ -22,9 +22,11 @@ class Solver:
         bc.apply(self.u, self.v)
 
     def _advection(self, u, v, dx, dy):
-        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and 
-        (u*dv/dx + v*dv/dy) for v-momentum."""
-        Nx, Ny = self.grid.Nx, self.grid.Ny
+        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and
+        (u*dv/dx + v*dv/dy) for v-momentum at cell centers.
+
+        On a staggered grid, u is at x-faces (Nx+1, Ny) and v is at y-faces (Nx, Ny+1).
+        Advection must be computed at cell centers, requiring interpolation from faces.
 
         # For u-momentum at u-faces (i+1/2, j), interior is [1:-1, 1:-1] -> shape (Nx-1, Ny-1)
         # We need to compute advection_u with shape (Nx-1, Ny-1)
