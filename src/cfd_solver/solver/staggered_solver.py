@@ -34,21 +34,53 @@ class StaggeredSolver:
         self._build_pressure_matrix()
 
     def _build_pressure_matrix(self):
+        """Build pressure Poisson matrix with Neumann BCs."""
         Nx, Ny = self.Nx, self.Ny
         dx2, dy2 = self.dx**2, self.dy**2
 
         N = Nx * Ny
         A = lil_matrix((N, N))
-        diag = 2.0 / dx2 + 2.0 / dy2
 
         for j in range(Ny):
             for i in range(Nx):
                 idx = j * Nx + i
+                
+                # Start with standard 5-point Laplacian coefficients
+                diag = 2.0 / dx2 + 2.0 / dy2
+                
+                # Left neighbor (i-1, j)
+                if i > 0:
+                    A[idx, idx - 1] = -1.0 / dx2
+                else:
+                    # Neumann BC at left: dp/dx = 0 => ghost cell p[-1,j] = p[1,j]
+                    # This modifies the diagonal: add 1/dx2 instead of connecting to left
+                    diag += 1.0 / dx2
+                
+                # Right neighbor (i+1, j)
+                if i < Nx - 1:
+                    A[idx, idx + 1] = -1.0 / dx2
+                else:
+                    # Neumann BC at right: dp/dx = 0 => ghost cell p[Nx,j] = p[Nx-2,j]
+                    # This modifies the diagonal: add 1/dx2 instead of connecting to right
+                    diag += 1.0 / dx2
+                
+                # Bottom neighbor (i, j-1)
+                if j > 0:
+                    A[idx, idx - Nx] = -1.0 / dy2
+                else:
+                    # Neumann BC at bottom: dp/dy = 0 => ghost cell p[i,-1] = p[i,1]
+                    # This modifies the diagonal: add 1/dy2 instead of connecting to bottom
+                    diag += 1.0 / dy2
+                
+                # Top neighbor (i, j+1)
+                if j < Ny - 1:
+                    A[idx, idx + Nx] = -1.0 / dy2
+                else:
+                    # Neumann BC at top: dp/dy = 0 => ghost cell p[i,Ny] = p[i,Ny-2]
+                    # This modifies the diagonal: add 1/dy2 instead of connecting to top
+                    diag += 1.0 / dy2
+                
                 A[idx, idx] = diag
-                if i > 0: A[idx, idx - 1] = -1.0 / dx2
-                if i < Nx - 1: A[idx, idx + 1] = -1.0 / dx2
-                if j > 0: A[idx, idx - Nx] = -1.0 / dy2
-                if j < Ny - 1: A[idx, idx + Nx] = -1.0 / dy2
 
         self.A = A.tocsr()
 
@@ -56,19 +88,20 @@ class StaggeredSolver:
         """Apply boundary conditions."""
         Nx, Ny = self.Nx, self.Ny
 
-        # Top and bottom walls
-        self.u[:, 0] = self.u_bottom
-        self.u[:, Ny - 1] = self.u_top
+        # Top and bottom walls (u-velocity on vertical faces at j=0 and j=Ny-1)
+        # Only set interior vertical faces, not corners which are handled by side walls
+        self.u[1:Nx, 0] = self.u_bottom  # bottom wall, exclude left corner
+        self.u[1:Nx, Ny - 1] = self.u_top  # top wall, exclude left corner
+        
+        # Left and right walls (u-velocity on vertical faces at i=0 and i=Nx)
+        self.u[0, :] = self.u_left   # left wall (all j including corners)
+        self.u[Nx, :] = self.u_right  # right wall (all j including corners)
 
-        # Left and right walls
-        self.u[0, :] = self.u_left
-        self.u[Nx, :] = self.u_right
-
-        # v-velocity at all walls
-        self.v[:, 0] = 0.0
-        self.v[:, Ny] = 0.0
-        self.v[0, :] = 0.0
-        self.v[Nx - 1, :] = 0.0
+        # v-velocity at all walls (v lives on horizontal faces)
+        self.v[:, 0] = 0.0      # bottom wall (j=0)
+        self.v[:, Ny] = 0.0     # top wall (j=Ny)
+        self.v[0, :] = 0.0      # left wall (i=0)
+        self.v[Nx - 1, :] = 0.0  # right wall (i=Nx-1)
 
     def step(self):
         """Advance one time step."""
