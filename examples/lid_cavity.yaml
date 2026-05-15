@@ -6,7 +6,7 @@ geometry:
 
 nu: 0.01       # kinematic viscosity
 dt: 0.001      # time step
-steps: 200
+steps: 1000
 
 boundary:
   top: {u: 1.0, v: 0.0}    # moving lid
