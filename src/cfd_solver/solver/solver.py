@@ -14,33 +14,42 @@ class Solver:
         self.dt = dt
         self.bc = bc
 
-        Nx, Ny = grid.Nx, grid.Ny
-        self.u = np.zeros((Nx, Ny))
-        self.v = np.zeros((Nx, Ny))
-        self.p = np.zeros((Nx, Ny))
+        # Use staggered grid dimensions from grid
+        self.u = np.zeros(grid.shape_u)  # (Nx+1, Ny)
+        self.v = np.zeros(grid.shape_v)  # (Nx, Ny+1)
+        self.p = np.zeros(grid.shape_p)  # (Nx, Ny)
 
         bc.apply(self.u, self.v)
 
     def _advection(self, u, v, dx, dy):
-        """Compute advection terms (u*du/dx + v*du/dy)."""
+        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and 
+        (u*dv/dx + v*dv/dy) for v-momentum."""
         Nx, Ny = self.grid.Nx, self.grid.Ny
 
-        # Use centered differences for advection
-        # du^2/dx
-        u_sq = u**2
-        d_u = (u_sq[1:-1, 2:] - u_sq[1:-1, :-2]) / (2 * dx)
+        # Compute derivatives at cell centers [1:-1, 1:-1]
+        # For u-momentum: u*du/dx + v*du/dy
+        dudx = (u[2:, 1:-1] - u[:-2, 1:-1]) / (2 * dx)  # ∂u/∂x
+        dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)  # ∂u/∂y
+        advection_u = u[1:-1, 1:-1] * dudx + v[1:-1, 1:-1] * dudy
 
-        # dv^2/dy
-        v_sq = v**2
-        d_v = (v_sq[2:, 1:-1] - v_sq[:-2, 1:-1]) / (2 * dy)
+        # For v-momentum: u*dv/dx + v*dv/dy
+        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)  # ∂v/∂x
+        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # ∂v/∂y
+        advection_v = u[1:-1, 1:-1] * dvdx + v[1:-1, 1:-1] * dvdy
 
-        return d_u, d_v
+        return advection_u, advection_v
 
     def _laplacian(self, u, dx, dy):
-        """Compute Laplacian using central differences."""
-        lap_x = (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / (dx**2)
-        lap_y = (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / (dy**2)
-        return lap_x + lap_y
+        """Compute Laplacian using central differences with boundary conditions."""
+        Nx, Ny = self.grid.Nx, self.grid.Ny
+        lap = np.zeros_like(u)
+        
+        # Interior points: standard 5-point stencil
+        lap[1:-1, 1:-1] = (
+            (u[2:, 1:-1] - 2*u[1:-1, 1:-1] + u[:-2, 1:-1]) / dx**2 +
+            (u[1:-1, 2:] - 2*u[1:-1, 1:-1] + u[1:-1, :-2]) / dy**2
+        )
+        return lap
 
     def step(self):
         """Advance one time step."""
@@ -59,18 +68,20 @@ class Solver:
         lap_u = self._laplacian(u, dx, dy)
         lap_v = self._laplacian(v, dx, dy)
 
-        # Interior update
+        # Interior update for u (at faces i+1/2, j)
         u_star[1:-1, 1:-1] = u[1:-1, 1:-1] + dt * (
-            -d_u - d_v + nu * lap_u[1:-1, 1:-1]
+            -d_u + nu * lap_u[1:-1, 1:-1]
         )
+        # Interior update for v (at faces i, j+1/2)
         v_star[1:-1, 1:-1] = v[1:-1, 1:-1] + dt * (
-            -d_u - d_v + nu * lap_v[1:-1, 1:-1]
+            -d_v + nu * lap_v[1:-1, 1:-1]
         )
 
         # --- Poisson: pressure correction ---
+        # Compute divergence at cell centers from face velocities
         div_u = (
-            (u_star[1:-1, 2:] - u_star[1:-1, :-2]) / (2 * dx) +
-            (v_star[2:, 1:-1] - v_star[:-2, 1:-1]) / (2 * dy)
+            (u_star[2:, 1:-1] - u_star[:-2, 1:-1]) / (2 * dx) +  # du/dx at cell centers
+            (v_star[1:-1, 2:] - v_star[1:-1, :-2]) / (2 * dy)    # dv/dy at cell centers
         )
 
         # Simple Jacobi iteration for pressure
@@ -84,8 +95,9 @@ class Solver:
             self.p = p_new
 
         # --- Corrector: apply pressure gradient ---
-        grad_p_x = (self.p[1:-1, 2:] - self.p[1:-1, :-2]) / (2 * dx)
-        grad_p_y = (self.p[2:, 1:-1] - self.p[:-2, 1:-1]) / (2 * dy)
+        # Pressure gradient at face locations
+        grad_p_x = (self.p[2:, 1:-1] - self.p[:-2, 1:-1]) / (2 * dx)  # dp/dx at u-faces
+        grad_p_y = (self.p[1:-1, 2:] - self.p[1:-1, :-2]) / (2 * dy)  # dp/dy at v-faces
 
         u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x
         v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y
@@ -104,6 +116,9 @@ class Solver:
     def divergence(self):
         """Check mass conservation. Should be ~0."""
         dx, dy = self.grid.dx, self.grid.dy
-        dv_dx = (self.u[1:-1, 2:] - self.u[1:-1, :-2]) / (2 * dx)
-        dv_dy = (self.v[2:, 1:-1] - self.v[:-2, 1:-1]) / (2 * dy)
+        # Divergence at cell centers: du/dx + dv/dy
+        # u is at x-faces: shape (Nx+1, Ny), so du/dx uses u[i+1,j] - u[i-1,j]
+        dv_dx = (self.u[2:, 1:-1] - self.u[:-2, 1:-1]) / (2 * dx)  # du/dx at cell centers
+        # v is at y-faces: shape (Nx, Ny+1), so dv/dy uses v[i,j+1] - v[i,j-1]
+        dv_dy = (self.v[1:-1, 2:] - self.v[1:-1, :-2]) / (2 * dy)  # dv/dy at cell centers
         return np.max(np.abs(dv_dx + dv_dy))
