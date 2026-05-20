@@ -28,8 +28,9 @@ class Solver:
         On a staggered grid, u is at x-faces (Nx+1, Ny) and v is at y-faces (Nx, Ny+1).
         Advection must be computed at cell centers, requiring interpolation from faces.
         """
-        # For u-momentum at u-faces (i+1/2, j), interior is [1:-1, 1:-1] -> shape (Nx-1, Ny-1)
-        # We need to compute advection_u with shape (Nx-1, Ny-1)
+        # For u-momentum at u-faces (i+1/2, j), interior is [1:-1, 1:-1] -> shape (Nx-1, Ny-2)
+        # Note: u has shape (Nx+1, Ny), so interior [1:-1, 1:-1] removes 2 rows in x and 2 in y,
+        # giving (Nx+1-2, Ny-2) = (Nx-1, Ny-2). We compute advection_u with this shape.
         
         # dudx at u-faces using central difference
         # u is at (i+1/2, j), so dudx at (i+1/2, j) uses u[i+3/2] - u[i-1/2] / (2*dx)
@@ -40,70 +41,40 @@ class Solver:
         # Use central diff: dudy[i,j] = (u[i,j+1] - u[i,j-1]) / (2*dy)
         dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)  # shape (Nx-1, Ny-2)
         
-        # Interpolate v to u-faces: v is at (i, j+1/2), average to get v at (i+1/2, j)
-        # v_at_u[i,j] = (v[i,j] + v[i+1,j]) / 2 ... but shapes don't match directly
-        # v shape: (Nx, Ny+1), we need (Nx-1, Ny-2) for interior
-        # Average in x: (v[1:, :] + v[:-1, :]) / 2 -> (Nx-1, Ny+1)
-        # Then take y-slice [1:-1] -> (Nx-1, Ny-1)... still not quite right
-        
-        # Simpler approach: compute everything at cell centers and interpolate
-        # Actually, let's use a simpler consistent scheme
-        
-        # For interior u points [1:-1, 1:-1], shape (Nx-1, Ny-1) but Ny dimension has no ghost cells
-        # So interior in y is actually just [1:-1] which gives Ny-2 valid points
-        # This means u[1:-1, 1:-1] has shape (Nx-1, Ny-2) when Ny=10 -> (9, 8)
-        
-        # Recompute with correct understanding:
-        # u shape: (Nx+1, Ny) = (11, 10), interior [1:-1, 1:-1] = (9, 8)
-        # v shape: (Nx, Ny+1) = (10, 11), interior [1:-1, 1:-1] = (8, 9)
-        
-        # dudx at u interior: (Nx-1, Ny-2)
-        dudx = (u[2:, 1:-1] - u[:-2, 1:-1]) / (2 * dx)
-        # dudy at u interior: (Nx-1, Ny-2)  
-        dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)
-        
-        # v interpolated to u locations: average v[i,j] and v[i+1,j]
-        # v[:, 1:-1] has shape (Nx, Ny-1) = (10, 9)
-        # We need (Nx-1, Ny-2) = (9, 8)
-        # First average in x: (v[1:, 1:-1] + v[:-1, 1:-1]) / 2 -> (9, 9)
-        # Then average in y or take middle slice... 
-        # Actually v at u-face (i+1/2, j) needs v[i,j] and v[i+1,j] averaged
-        # But v[i,j] is at (i, j+1/2), so for u at (i+1/2, j), we need 4-point avg
-        v_at_u = (v[1:, 1:-1] + v[:-1, 1:-1]) / 2  # (9, 9) - average in x
-        v_at_u = v_at_u[:, :-1]  # (9, 8) - trim last y to match
+        # Interpolate v to u-faces: v is at (i, j+1/2), we need it at (i+1/2, j)
+        # Strategy: average v in x-direction at interior y-points
+        # v shape: (Nx, Ny+1), select interior y: v[:, 1:-1] -> (Nx, Ny-1)
+        # Average in x: (v[1:, 1:-1] + v[:-1, 1:-1]) / 2 -> (Nx-1, Ny-1)
+        # But we only need interior u points at [1:-1, 1:-1] -> (Nx-1, Ny-2)
+        # So we trim y: [:, :-1] -> (Nx-1, Ny-2)
+        v_at_u = (v[1:, 1:-1] + v[:-1, 1:-1]) / 2.0  # Average in x: (Nx-1, Ny-1)
+        v_at_u = v_at_u[:, :-1]  # Select interior y points: (Nx-1, Ny-2)
         
         # u velocity at u interior points
-        u_adv = u[1:-1, 1:-1]  # (9, 8)
+        u_adv = u[1:-1, 1:-1]  # (Nx-1, Ny-2)
         
         advection_u = u_adv * dudx + v_at_u * dudy
 
         # For v-momentum at v-faces (i, j+1/2)
-        # v shape: (Nx, Ny+1), interior [1:-1, 1:-1] -> (8, 9)
+        # v shape: (Nx, Ny+1), interior [1:-1, 1:-1] -> (Nx-2, Ny-1)
         
         # dvdx at v interior
-        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)  # (6, 9)
+        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)  # (Nx-2, Ny-1)
         # dvdy at v interior
-        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # (8, 9)
+        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # (Nx-2, Ny-1)
         
-        # u interpolated to v locations
-        # u shape (11, 10), need (8, 9) for v interior
-        # u at v-face (i, j+1/2): average u[i,j] and u[i,j+1]
-        u_at_v = (u[1:-1, 1:] + u[1:-1, :-1]) / 2  # (9, 9) - average in y
-        u_at_v = u_at_v[:-1, :]  # (8, 9) - trim last x
+        # Interpolate u to v-faces: u is at (i+1/2, j), we need it at (i, j+1/2)
+        # Strategy: average u in y-direction at interior x-points
+        # u shape: (Nx+1, Ny), select interior x: u[1:-1, :] -> (Nx-1, Ny)
+        # Average in y: (u[1:-1, 1:] + u[1:-1, :-1]) / 2 -> (Nx-1, Ny-1)
+        # But we only need interior v points at [1:-1, 1:-1] -> (Nx-2, Ny-1)
+        # So we trim x: [:-1, :] -> (Nx-2, Ny-1)
+        u_at_v = (u[1:-1, 1:] + u[1:-1, :-1]) / 2.0  # Average in y: (Nx-1, Ny-1)
+        u_at_v = u_at_v[:-1, :]  # Select interior x points: (Nx-2, Ny-1)
         
         # But wait, dvdx is (6, 9), not (8, 9). Need to fix dvdx computation
-        # dvdx should be computed such that result matches v interior shape
         
-        # Let me reconsider: v[2:, 1:-1] with v shape (10, 11)
-        # v[2:, 1:-1] -> (8, 9), v[:-2, 1:-1] -> (8, 9), diff -> (8, 9)? No!
-        # v[2:] removes first 2 rows: 10-2=8, v[:-2] removes last 2: 10-2=8
-        # So dvdx shape is (8, 9), same as dvdy
-        
-        # Actually I miscounted. Let me verify:
-        # v.shape = (10, 11), v[2:, 1:-1] -> (8, 9), v[:-2, 1:-1] -> (8, 9)
-        # diff -> (8, 9). Yes!
-        
-        v_adv = v[1:-1, 1:-1]  # (8, 9)
+        v_adv = v[1:-1, 1:-1]  # (Nx-2, Ny-1)
         advection_v = u_at_v * dvdx + v_adv * dvdy
 
         return advection_u, advection_v
@@ -145,6 +116,10 @@ class Solver:
         v_star[1:-1, 1:-1] = v[1:-1, 1:-1] + dt * (
             -d_v + nu * lap_v[1:-1, 1:-1]
         )
+        
+        # Apply boundary conditions to predictor velocities for consistent advection in next iteration
+        # This ensures boundary conditions are enforced at the same time level for the divergence calculation
+        self.bc.apply(u_star, v_star)
 
         # --- Poisson: pressure correction ---
         # Compute divergence at cell centers from face velocities
@@ -184,6 +159,11 @@ class Solver:
             
             # Apply SOR relaxation
             self.p = omega * p_new + (1 - omega) * self.p
+            
+            # Check convergence: if pressure change is below tolerance, early termination
+            residual = np.max(np.abs(self.p - p_old))
+            if residual < 1e-6:
+                break
 
         # --- Corrector: apply pressure gradient ---
         # Pressure gradient at face locations
