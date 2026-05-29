@@ -2,8 +2,8 @@
 
 import argparse
 import yaml
-from .solver import Grid, Solver, BoundaryConditions
-from .viz import save_velocity_plot
+from cfd_solver.solver import Grid, Solver, BoundaryConditions
+from cfd_solver.solver.viz import save_velocity_plot
 
 
 def run(args):

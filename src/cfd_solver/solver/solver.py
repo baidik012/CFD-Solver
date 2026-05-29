@@ -1,6 +1,8 @@
 """Chorin projection method solver."""
 
 import numpy as np
+from scipy.sparse import lil_matrix
+from scipy.sparse.linalg import cg
 from .boundaries import BoundaryConditions
 from .grid import Grid
 
@@ -19,7 +21,42 @@ class Solver:
         self.v = np.zeros(grid.shape_v)  # (Nx, Ny+1)
         self.p = np.zeros(grid.shape_p)  # (Nx, Ny)
 
+        self._build_pressure_matrix()
         bc.apply(self.u, self.v)
+
+    def _build_pressure_matrix(self):
+        """Build positive -Laplacian pressure matrix with Neumann walls."""
+        Nx, Ny = self.grid.Nx, self.grid.Ny
+        dx2, dy2 = self.grid.dx**2, self.grid.dy**2
+        A = lil_matrix((Nx * Ny, Nx * Ny))
+
+        for i in range(Nx):
+            for j in range(Ny):
+                idx = i * Ny + j
+                diag = 0.0
+
+                if i > 0:
+                    A[idx, idx - Ny] = -1.0 / dx2
+                    diag += 1.0 / dx2
+                if i < Nx - 1:
+                    A[idx, idx + Ny] = -1.0 / dx2
+                    diag += 1.0 / dx2
+                if j > 0:
+                    A[idx, idx - 1] = -1.0 / dy2
+                    diag += 1.0 / dy2
+                if j < Ny - 1:
+                    A[idx, idx + 1] = -1.0 / dy2
+                    diag += 1.0 / dy2
+
+                A[idx, idx] = diag
+
+        # Fix one pressure value to remove the Neumann nullspace while
+        # keeping the matrix symmetric for conjugate gradient.
+        A[0, 0] = 1.0
+        A[0, :] = 0.0
+        A[:, 0] = 0.0
+        A[0, 0] = 1.0
+        self.pressure_matrix = A.tocsr()
 
     def _advection(self, u, v, dx, dy):
         """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and
@@ -41,14 +78,11 @@ class Solver:
         # Use central diff: dudy[i,j] = (u[i,j+1] - u[i,j-1]) / (2*dy)
         dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)  # shape (Nx-1, Ny-2)
         
-        # Interpolate v to u-faces: v is at (i, j+1/2), we need it at (i+1/2, j)
-        # Strategy: average v in x-direction at interior y-points
-        # v shape: (Nx, Ny+1), select interior y: v[:, 1:-1] -> (Nx, Ny-1)
-        # Average in x: (v[1:, 1:-1] + v[:-1, 1:-1]) / 2 -> (Nx-1, Ny-1)
-        # But we only need interior u points at [1:-1, 1:-1] -> (Nx-1, Ny-2)
-        # So we trim y: [:, :-1] -> (Nx-1, Ny-2)
-        v_at_u = (v[1:, 1:-1] + v[:-1, 1:-1]) / 2.0  # Average in x: (Nx-1, Ny-1)
-        v_at_u = v_at_u[:, :-1]  # Select interior y points: (Nx-1, Ny-2)
+        # Interpolate v to u-faces from the four surrounding v-face values.
+        v_at_u = 0.25 * (
+            v[:-1, 1:-2] + v[1:, 1:-2] +
+            v[:-1, 2:-1] + v[1:, 2:-1]
+        )
         
         # u velocity at u interior points
         u_adv = u[1:-1, 1:-1]  # (Nx-1, Ny-2)
@@ -63,16 +97,11 @@ class Solver:
         # dvdy at v interior
         dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # (Nx-2, Ny-1)
         
-        # Interpolate u to v-faces: u is at (i+1/2, j), we need it at (i, j+1/2)
-        # Strategy: average u in y-direction at interior x-points
-        # u shape: (Nx+1, Ny), select interior x: u[1:-1, :] -> (Nx-1, Ny)
-        # Average in y: (u[1:-1, 1:] + u[1:-1, :-1]) / 2 -> (Nx-1, Ny-1)
-        # But we only need interior v points at [1:-1, 1:-1] -> (Nx-2, Ny-1)
-        # So we trim x: [:-1, :] -> (Nx-2, Ny-1)
-        u_at_v = (u[1:-1, 1:] + u[1:-1, :-1]) / 2.0  # Average in y: (Nx-1, Ny-1)
-        u_at_v = u_at_v[:-1, :]  # Select interior x points: (Nx-2, Ny-1)
-        
-        # But wait, dvdx is (6, 9), not (8, 9). Need to fix dvdx computation
+        # Interpolate u to v-faces from the four surrounding u-face values.
+        u_at_v = 0.25 * (
+            u[1:-2, :-1] + u[2:-1, :-1] +
+            u[1:-2, 1:] + u[2:-1, 1:]
+        )
         
         v_adv = v[1:-1, 1:-1]  # (Nx-2, Ny-1)
         advection_v = u_at_v * dvdx + v_adv * dvdy
@@ -132,38 +161,18 @@ class Solver:
             (v_star[:, 1:] - v_star[:, :-1]) / dy    # dv/dy
         )
 
-        # Pressure Poisson equation: nabla^2 p = rho * div / dt
-        # Using standard 5-point stencil with proper RHS scaling
-        # The RHS should be div/dt at ALL cell centers, not just interior
+        # Pressure Poisson equation: nabla^2 p = div / dt.
+        # Pure Neumann pressure BCs need a compatible zero-mean RHS.
         rhs = div / dt
+        rhs -= np.mean(rhs)
         
-        # SOR (Successive Over-Relaxation) for pressure with better convergence
-        # Neumann boundary conditions: dp/dn = 0 at all walls
-        omega = 1.5  # over-relaxation parameter (1 < omega < 2)
-        for _ in range(300):
-            p_old = self.p.copy()
-            # Update interior points using 5-point stencil
-            p_new = self.p.copy()
-            p_new[1:-1, 1:-1] = (
-                (self.p[2:, 1:-1] + self.p[:-2, 1:-1]) / dx**2 +
-                (self.p[1:-1, 2:] + self.p[1:-1, :-2]) / dy**2 -
-                rhs[1:-1, 1:-1]
-            ) / (2 / dx**2 + 2 / dy**2)
-            
-            # Apply Neumann boundary conditions (zero normal derivative)
-            # Extrapolate pressure at boundaries
-            p_new[0, :] = p_new[1, :]    # left boundary
-            p_new[-1, :] = p_new[-2, :]  # right boundary
-            p_new[:, 0] = p_new[:, 1]    # bottom boundary
-            p_new[:, -1] = p_new[:, -2]  # top boundary
-            
-            # Apply SOR relaxation
-            self.p = omega * p_new + (1 - omega) * self.p
-            
-            # Check convergence: if pressure change is below tolerance, early termination
-            residual = np.max(np.abs(self.p - p_old))
-            if residual < 1e-6:
-                break
+        rhs_flat = (-rhs).ravel()
+        rhs_flat[0] = 0.0
+        p_flat, info = cg(self.pressure_matrix, rhs_flat, x0=self.p.ravel())
+        if info != 0:
+            raise RuntimeError(f"Pressure solve failed to converge (info={info})")
+        self.p = p_flat.reshape(self.grid.shape_p)
+        self.p -= np.mean(self.p)
 
         # --- Corrector: apply pressure gradient ---
         # Pressure gradient at face locations
@@ -191,10 +200,10 @@ class Solver:
         for i in range(steps):
             self.step()
             if verbose and i % 100 == 0:
-                div = self.divergence()
+                div = self.divergence(interior_only=True)
                 print(f"Step {i}: max |∇·u| = {div:.6e}")
 
-    def divergence(self):
+    def divergence(self, interior_only: bool = False):
         """Check mass conservation. Should be ~0."""
         dx, dy = self.grid.dx, self.grid.dy
         # Divergence at cell centers: du/dx + dv/dy
@@ -204,4 +213,6 @@ class Solver:
             (self.u[1:, :] - self.u[:-1, :]) / dx +  # du/dx at cell centers
             (self.v[:, 1:] - self.v[:, :-1]) / dy    # dv/dy at cell centers
         )
+        if interior_only and div.shape[0] > 2 and div.shape[1] > 2:
+            div = div[1:-1, 1:-1]
         return np.max(np.abs(div))
