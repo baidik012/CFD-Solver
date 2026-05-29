@@ -29,8 +29,15 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
         Xidx, Yidx = np.meshgrid(xi, yi)
         Xp, Yp = Xidx[::skip, ::skip], Yidx[::skip, ::skip]
 
-    U = u[::skip, ::skip]
-    V = v[::skip, ::skip]
+    if u.shape == grid.shape_u and v.shape == grid.shape_v:
+        U_full = 0.5 * (u[1:, :] + u[:-1, :])
+        V_full = 0.5 * (v[:, 1:] + v[:, :-1])
+    else:
+        U_full = u
+        V_full = v
+
+    U = U_full[::skip, ::skip]
+    V = V_full[::skip, ::skip]
 
     q = ax.quiver(Xp, Yp, U, V, color='black', alpha=0.6, scale=scale)
 
@@ -44,6 +51,28 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
     print(f"Saved {path}")
 
 
+def _cell_center_plot_fields(solver):
+    """Return cell-centered fields in Matplotlib's (y, x) array order."""
+    Nx, Ny = solver.Nx, solver.Ny
+
+    u_center = 0.5 * (solver.u[1:, :] + solver.u[:-1, :])
+    v_center = 0.5 * (solver.v[:, 1:] + solver.v[:, :-1])
+    speed = np.sqrt(u_center**2 + v_center**2)
+
+    x = np.linspace(solver.dx / 2, solver.Lx - solver.dx / 2, Nx)
+    y = np.linspace(solver.dy / 2, solver.Ly - solver.dy / 2, Ny)
+    X, Y = np.meshgrid(x, y)
+
+    return {
+        "X": X,
+        "Y": Y,
+        "pressure": solver.p.T,
+        "speed": speed.T,
+        "u": u_center.T,
+        "v": v_center.T,
+    }
+
+
 def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     """Save pressure contours and velocity vectors for staggered solver.
 
@@ -52,23 +81,20 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    Nx, Ny = solver.Nx, solver.Ny
-    Lx, Ly = solver.Lx, solver.Ly
-
-    u_center = 0.5 * (solver.u[1:, :] + solver.u[:-1, :])
-    v_center = 0.5 * (solver.v[:, 1:] + solver.v[:, :-1])
-
-    x = np.linspace(0, Lx, Nx)
-    y = np.linspace(0, Ly, Ny)
-    X, Y = np.meshgrid(x, y)
-
-    speed = np.sqrt(u_center**2 + v_center**2)
+    Nx = solver.Nx
+    fields = _cell_center_plot_fields(solver)
+    X = fields["X"]
+    Y = fields["Y"]
+    pressure = fields["pressure"]
+    speed = fields["speed"]
+    u_center = fields["u"]
+    v_center = fields["v"]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Pressure contours
     ax = axes[0]
-    cf = ax.contourf(X, Y, solver.p, levels=20, cmap='RdBu_r')
+    cf = ax.contourf(X, Y, pressure, levels=20, cmap='RdBu_r')
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
     ax.set_title("Pressure Field")
@@ -77,11 +103,8 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     
     # If mask provided, overlay solid regions with gray hatch
     if cell_mask is not None:
-        x_cell = np.linspace(0, Lx, Nx)
-        y_cell = np.linspace(0, Ly, Ny)
-        X_cell, Y_cell = np.meshgrid(x_cell, y_cell)
-        solid_mask = (~cell_mask).astype(float)
-        ax.contourf(X_cell, Y_cell, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+        solid_mask = (~cell_mask).astype(float).T
+        ax.contourf(X, Y, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
 
     # Velocity field
     ax = axes[1]
@@ -99,8 +122,7 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     
     # If mask provided, overlay solid regions with gray
     if cell_mask is not None:
-        solid_mask = (~cell_mask).astype(float)
-        ax.contourf(X_cell, Y_cell, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+        ax.contourf(X, Y, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
 
     plt.tight_layout()
     plt.savefig(path)
