@@ -52,7 +52,6 @@ class Solver:
 
         # Fix one pressure value to remove the Neumann nullspace while
         # keeping the matrix symmetric for conjugate gradient.
-        A[0, 0] = 1.0
         A[0, :] = 0.0
         A[:, 0] = 0.0
         A[0, 0] = 1.0
@@ -176,10 +175,10 @@ class Solver:
 
         # --- Corrector: apply pressure gradient ---
         # Pressure gradient at face locations
-        # dp/dx at u-faces: use p[i+1,j] - p[i,j], shape (Nx, Ny) -> (9, 10) for Nx=10,Ny=10
-        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx  # shape (Nx, Ny)
-        # dp/dy at v-faces: use p[i,j+1] - p[i,j], shape (Nx, Ny) -> (10, 9) for Nx=10,Ny=10
-        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy  # shape (Nx, Ny)
+        # dp/dx at u-faces: p[i+1,j] - p[i,j], shape (Nx-1, Ny)
+        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx
+        # dp/dy at v-faces: p[i,j+1] - p[i,j], shape (Nx, Ny-1)
+        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy
 
         # Update interior u and v
         # u[1:-1, 1:-1] has shape (Nx-1, Ny-2) = (9, 8)

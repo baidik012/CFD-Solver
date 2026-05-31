@@ -22,6 +22,10 @@ def test_grid_shapes():
     Y = g.Y
     assert X.shape == (8, 6)
     assert Y.shape == (8, 6)
+    assert g.Xv.shape == (7, 8)
+    assert g.Yv.shape == (7, 8)
+    assert g.Xv_T.shape == (8, 7)
+    assert g.Yv_T.shape == (8, 7)
 
 
 def test_pressure_zero_mean_after_step():
@@ -75,8 +79,7 @@ def test_boundary_conditions_apply_to_staggered_sides():
     assert np.allclose(u[-1, 1:-1], bc.right_u)
     assert np.allclose(v[1:-1, -1], bc.top_v)
     assert np.allclose(v[1:-1, 0], bc.bottom_v)
-    assert np.allclose(v[0, 1:-1], bc.left_v)
-    assert np.allclose(v[-1, 1:-1], bc.right_v)
+    # v is NOT defined on left/right walls (cell-center x positions)
 
 
 def test_original_solver_lid_cavity_remains_finite():
