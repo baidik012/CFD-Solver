@@ -52,33 +52,31 @@ class StaggeredSolver:
                 if i > 0:
                     A[idx, idx - Ny] = -1.0 / dx2
                 else:
-                    # Neumann BC at left: dp/dx = 0 => ghost cell p[-1,j] = p[1,j]
-                    # This modifies the diagonal: add 1/dx2 instead of connecting to left
-                    diag += 1.0 / dx2
+                    # Neumann BC at left: dp/dx = 0 => ghost p[-1,j] = p[0,j]
+                    # (p[-1] - 2p[0] + p[1])/dx² = (p[0] - 2p[0] + p[1])/dx² = (p[1] - p[0])/dx²
+                    # In A@p form: -(p[1]-p[0])/dx² = (p[0] - p[1])/dx², so diag -= 1/dx²
+                    diag -= 1.0 / dx2
                 
                 # Right neighbor (i+1, j)
                 if i < Nx - 1:
                     A[idx, idx + Ny] = -1.0 / dx2
                 else:
-                    # Neumann BC at right: dp/dx = 0 => ghost cell p[Nx,j] = p[Nx-2,j]
-                    # This modifies the diagonal: add 1/dx2 instead of connecting to right
-                    diag += 1.0 / dx2
+                    # Neumann BC at right: dp/dx = 0 => ghost p[Nx,j] = p[Nx-1,j]
+                    diag -= 1.0 / dx2
                 
                 # Bottom neighbor (i, j-1)
                 if j > 0:
                     A[idx, idx - 1] = -1.0 / dy2
                 else:
-                    # Neumann BC at bottom: dp/dy = 0 => ghost cell p[i,-1] = p[i,1]
-                    # This modifies the diagonal: add 1/dy2 instead of connecting to bottom
-                    diag += 1.0 / dy2
+                    # Neumann BC at bottom: dp/dy = 0 => ghost p[i,-1] = p[i,0]
+                    diag -= 1.0 / dy2
                 
                 # Top neighbor (i, j+1)
                 if j < Ny - 1:
                     A[idx, idx + 1] = -1.0 / dy2
                 else:
-                    # Neumann BC at top: dp/dy = 0 => ghost cell p[i,Ny] = p[i,Ny-2]
-                    # This modifies the diagonal: add 1/dy2 instead of connecting to top
-                    diag += 1.0 / dy2
+                    # Neumann BC at top: dp/dy = 0 => ghost p[i,Ny] = p[i,Ny-1]
+                    diag -= 1.0 / dy2
                 
                 A[idx, idx] = diag
 
@@ -90,36 +88,28 @@ class StaggeredSolver:
         self.A = A.tocsr()
 
     def _apply_bc(self):
-        """Apply boundary conditions."""
+        """Apply boundary conditions for lid-driven cavity.
+
+        Grid layout:
+          u: shape (Nx+1, Ny) — u[i,j] on vertical face at x=i*dx, y=(j+0.5)*dy
+          v: shape (Nx, Ny+1) — v[i,j] on horizontal face at x=(i+0.5)*dx, y=j*dy
+          p: shape (Nx, Ny)   — p[i,j] at cell center (i+0.5)*dx, (j+0.5)*dy
+
+        u is directly on left/right walls (i=0, i=Nx) and on top/bottom walls (j=0, j=Ny-1).
+        v is directly on top/bottom walls (j=0, j=Ny) but NOT on left/right walls.
+        """
         Nx, Ny = self.Nx, self.Ny
 
-        # Top and bottom walls (u-velocity on vertical faces at j=0 and j=Ny-1)
-        # Only set interior vertical faces, not corners which are handled by side walls
-        self.u[1:Nx, 0] = self.u_bottom  # bottom wall, exclude left corner
-        self.u[1:Nx, Ny - 1] = self.u_top  # top wall, exclude left corner
-        
-        # Left and right walls (u-velocity on vertical faces at i=0 and i=Nx)
-        self.u[0, :] = self.u_left   # left wall (all j including corners)
-        self.u[Nx, :] = self.u_right  # right wall (all j including corners)
+        # u-velocity: all walls (u lives on vertical faces)
+        self.u[0, :] = self.u_left       # left wall (x=0)
+        self.u[Nx, :] = self.u_right     # right wall (x=Lx)
+        self.u[:, 0] = self.u_bottom     # bottom wall (y=0)
+        self.u[:, Ny - 1] = self.u_top   # top wall (y=Ly) — lid, set last so corners = lid
 
-        # v-velocity at all walls (v lives on horizontal faces)
-        self.v[:, 0] = 0.0      # bottom wall (j=0)
-        self.v[:, Ny] = 0.0     # top wall (j=Ny)
-        self.v[0, :] = 0.0      # left wall (i=0)
-        self.v[Nx - 1, :] = 0.0  # right wall (i=Nx-1)
-
-        # u-velocity: apply in correct order for lid-driven cavity
-        # Corners should follow lid velocity (top wall) for mass conservation
-        self.u[:, 0] = self.u_bottom  # bottom wall
-        self.u[0, :] = self.u_left    # left wall
-        self.u[Nx, :] = self.u_right  # right wall
-        # Top wall (lid) last - overwrites corners with lid velocity
-        self.u[:, Ny - 1] = self.u_top
-
-        # Fix corners: for lid-driven cavity, corners move with lid
-        # This prevents artificial mass sources at corners
-        self.u[0, Ny - 1] = self.u_top     # left-top corner
-        self.u[Nx, Ny - 1] = self.u_top    # right-top corner
+        # v-velocity: top and bottom walls (v lives on horizontal faces)
+        # v is NOT defined on left/right walls (those are at cell-center x positions)
+        self.v[:, 0] = 0.0               # bottom wall (y=0)
+        self.v[:, Ny] = 0.0              # top wall (y=Ly)
 
     def _advection(self, u, v):
         """Compute advection term - placeholder returning zeros."""
@@ -199,15 +189,16 @@ class StaggeredSolver:
         # Re-apply boundary conditions
         self._apply_bc()
 
+    def _divergence(self):
+        return ((self.u[1:, :] - self.u[:-1, :]) / self.dx +
+                (self.v[:, 1:] - self.v[:, :-1]) / self.dy)
+
     def divergence_norm(self):
-        # compute divergence at cell centers using face velocities (shape: Nx x Ny)
-        div = (self.u[1:, :] - self.u[:-1, :]) / self.dx + (self.v[:, 1:] - self.v[:, :-1]) / self.dy
+        div = self._divergence()
         return np.sqrt(np.mean(div**2))
 
     def max_divergence(self):
-        # compute divergence at cell centers using face velocities (shape: Nx x Ny)
-        div = (self.u[1:, :] - self.u[:-1, :]) / self.dx + (self.v[:, 1:] - self.v[:, :-1]) / self.dy
-        return np.max(np.abs(div))
+        return np.max(np.abs(self._divergence()))
 
     def cfl(self):
         return (np.max(np.abs(self.u)) * self.dt / self.dx +
