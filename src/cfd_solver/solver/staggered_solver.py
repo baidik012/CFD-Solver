@@ -250,7 +250,10 @@ class StaggeredSolver:
         grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx   # shape (Nx-1, Ny)
         grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy   # shape (Nx, Ny-1)
 
-        # Update face velocities on interior faces
+        # Apply pressure correction to all interior faces. The projection
+        # guarantees a divergence-free field. Re-applying BCs below will
+        # re-introduce O(dx) divergence at boundary-adjacent cells, which
+        # is a known artifact of the projection method.
         self.u[1:-1, :] = u_star[1:-1, :] - dt * grad_p_x
         self.v[:, 1:-1] = v_star[:, 1:-1] - dt * grad_p_y
 
@@ -265,8 +268,11 @@ class StaggeredSolver:
         div = self._divergence()
         return np.sqrt(np.mean(div**2))
 
-    def max_divergence(self):
-        return np.max(np.abs(self._divergence()))
+    def max_divergence(self, interior_only=False):
+        div = self._divergence()
+        if interior_only and div.shape[0] > 2 and div.shape[1] > 2:
+            div = div[1:-1, 1:-1]
+        return np.max(np.abs(div))
 
     def cfl(self):
         return (np.max(np.abs(self.u)) * self.dt / self.dx +
@@ -276,4 +282,5 @@ class StaggeredSolver:
         for i in range(steps):
             self.step()
             if verbose and i % max(1, steps // 10) == 0:
-                print(f"Step {i:4d}: |∇·u|∞ = {self.max_divergence():.2e}, CFL = {self.cfl():.3f}")
+                print(f"Step {i:4d}: |∇·u|∞_int = {self.max_divergence(interior_only=True):.2e}, "
+                      f"|∇·u|∞_all = {self.max_divergence():.2e}, CFL = {self.cfl():.3f}")
