@@ -41,16 +41,16 @@ class StaggeredSolver:
         N = Nx * Ny
         A = lil_matrix((N, N))
 
-        for j in range(Ny):
-            for i in range(Nx):
-                idx = j * Nx + i
+        for i in range(Nx):
+            for j in range(Ny):
+                idx = i * Ny + j
                 
                 # Start with standard 5-point Laplacian coefficients
                 diag = 2.0 / dx2 + 2.0 / dy2
                 
                 # Left neighbor (i-1, j)
                 if i > 0:
-                    A[idx, idx - 1] = -1.0 / dx2
+                    A[idx, idx - Ny] = -1.0 / dx2
                 else:
                     # Neumann BC at left: dp/dx = 0 => ghost cell p[-1,j] = p[1,j]
                     # This modifies the diagonal: add 1/dx2 instead of connecting to left
@@ -58,7 +58,7 @@ class StaggeredSolver:
                 
                 # Right neighbor (i+1, j)
                 if i < Nx - 1:
-                    A[idx, idx + 1] = -1.0 / dx2
+                    A[idx, idx + Ny] = -1.0 / dx2
                 else:
                     # Neumann BC at right: dp/dx = 0 => ghost cell p[Nx,j] = p[Nx-2,j]
                     # This modifies the diagonal: add 1/dx2 instead of connecting to right
@@ -66,7 +66,7 @@ class StaggeredSolver:
                 
                 # Bottom neighbor (i, j-1)
                 if j > 0:
-                    A[idx, idx - Nx] = -1.0 / dy2
+                    A[idx, idx - 1] = -1.0 / dy2
                 else:
                     # Neumann BC at bottom: dp/dy = 0 => ghost cell p[i,-1] = p[i,1]
                     # This modifies the diagonal: add 1/dy2 instead of connecting to bottom
@@ -74,7 +74,7 @@ class StaggeredSolver:
                 
                 # Top neighbor (i, j+1)
                 if j < Ny - 1:
-                    A[idx, idx + Nx] = -1.0 / dy2
+                    A[idx, idx + 1] = -1.0 / dy2
                 else:
                     # Neumann BC at top: dp/dy = 0 => ghost cell p[i,Ny] = p[i,Ny-2]
                     # This modifies the diagonal: add 1/dy2 instead of connecting to top
