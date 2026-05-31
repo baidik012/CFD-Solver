@@ -100,15 +100,14 @@ git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
 
-**2. Set up a virtual environment:**
+**2. Set up environment:**
+
+**Windows — double-click `setup.bat`** (does everything automatically).
+
+**Mac/Linux:**
 ```bash
 python -m venv venv
-source venv/bin/activate      # Mac/Linux
-venv\Scripts\activate         # Windows
-```
-
-**3. Install dependencies:**
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 

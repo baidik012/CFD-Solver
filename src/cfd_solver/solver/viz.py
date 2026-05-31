@@ -94,7 +94,7 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
 
     # Pressure contours
     ax = axes[0]
-    cf = ax.contourf(X, Y, pressure, levels=20, cmap='RdBu_r')
+    cf = ax.contourf(X, Y, pressure, levels=100, cmap='RdBu_r')
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
     ax.set_title("Pressure Field")
@@ -108,7 +108,7 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
 
     # Velocity field
     ax = axes[1]
-    cf = ax.contourf(X, Y, speed, levels=20, cmap='viridis')
+    cf = ax.contourf(X, Y, speed, levels=100, cmap='viridis')
     if skip is None:
         skip = max(1, Nx // 32)
     ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
