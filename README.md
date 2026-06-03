@@ -9,7 +9,6 @@ An internal tool for simulating incompressible fluid flow. Built by the club to 
 - [How We Solve It](#how-we-solve-it)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
-- [Quickstart Guide](QUICKSTART.md)
 - [Contributing](#contributing)
 
 ---
@@ -82,19 +81,22 @@ CFD-Solver/
 │   │   └── viz.py          # Plotting
 │   └── cli/                # Command-line interface
 ├── examples/                # Ready-to-run simulations
-│   ├── lid_cavity.py       # Basic example
-│   └── staggered_cavity.py # Production example
 ├── output/                  # Results and plots
 ├── tests/                   # Unit tests
-├── pyproject.toml          # Package configuration
-└── requirements.txt        # Dependencies
+├── run_interactive.py       # Interactive parameter setup + solver launch
+├── setup.bat                # Windows setup
+├── setup.sh                 # Mac/Linux setup
+├── run.bat                  # Windows one-click run
+├── run.sh                   # Mac/Linux one-click run
+├── pyproject.toml           # Package configuration
+└── requirements.txt         # Dependencies
 ```
 
 ---
 
 ## Getting Started
 
-**1. Clone and enter the repo:**
+**1. Clone the repo:**
 ```bash
 git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
@@ -102,25 +104,19 @@ cd CFD-Solver
 
 **2. Set up environment:**
 
-**Windows — double-click `setup.bat`** (does everything automatically).
+- **Windows** — double-click `setup.bat`
+- **Mac/Linux** — run `./setup.sh`
 
-**Mac/Linux:**
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
+Both create a virtual environment and install everything automatically.
 
 ### Run a simulation
 
-```bash
-# Production (staggered grid, more accurate)
-python examples/staggered_cavity.py
-```
+- **Windows** — double-click `run.bat`
+- **Mac/Linux** — run `./run.sh`
 
-Results go to the `output/` directory.
+You'll be asked for simulation parameters (grid size, viscosity, time steps, etc.) with sensible defaults. Just press Enter to accept the defaults. The solver runs and opens the result image automatically.
 
-**First time?** Read the [Quickstart Guide](QUICKSTART.md) for a walkthrough of what everything means.
+No code editing or YAML files needed.
 
 ### Run tests
 
