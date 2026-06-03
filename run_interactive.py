@@ -15,13 +15,6 @@ def ask(prompt, default):
     return type(default)(val) if val else default
 
 
-def max_stable_dt(Nx, Ny, nu):
-    """Compute the max stable time step for explicit diffusion."""
-    dx = 1.0 / Nx
-    dy = 1.0 / Ny
-    return 1.0 / (2.0 * nu * (1.0 / dx**2 + 1.0 / dy**2))
-
-
 def main():
     print()
     print("========================================")
@@ -34,20 +27,9 @@ def main():
     Nx = ask("Grid cells in x", 32)
     Ny = ask("Grid cells in y", 32)
     nu = ask("Viscosity (nu)", 0.01)
+    dt = ask("Time step (dt)", 0.001)
     steps = ask("Number of steps", 200)
     top_u = ask("Lid speed", 1.0)
-
-    dt_max = max_stable_dt(Nx, Ny, nu)
-    dt_suggested = round(dt_max * 0.9, 6)
-    print()
-    print(f"  Stability limit: dt <= {dt_max:.6f}")
-    dt = ask("Time step (dt)", dt_suggested)
-
-    if dt > dt_max:
-        print()
-        print(f"  WARNING: dt={dt} exceeds stability limit {dt_max:.6f}")
-        print(f"  The solver will likely blow up. Reducing dt to {dt_suggested}.")
-        dt = dt_suggested
 
     print()
     print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  steps={steps}  |  lid={top_u}")

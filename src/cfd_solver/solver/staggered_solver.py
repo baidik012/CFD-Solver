@@ -36,6 +36,7 @@ class StaggeredSolver:
         self.p = np.zeros((Nx, Ny))
 
         self._build_pressure_matrix()
+        self._build_diffusion_matrices()
 
     def _build_pressure_matrix(self):
         """Build the positive-Laplacian pressure matrix with Neumann walls."""
@@ -79,6 +80,72 @@ class StaggeredSolver:
         A[0, 0] = 1.0
 
         self.A = A.tocsr()
+
+    def _build_diffusion_matrices(self):
+        """Build Crank-Nicolson diffusion matrices (I - 0.5*dt*nu*L) for u and v.
+
+        u unknowns: interior faces i=1..Nx-1, j=1..Ny-2
+        v unknowns: all i=0..Nx-1, interior j=1..Ny-1
+        """
+        Nx, Ny = self.Nx, self.Ny
+        dx2, dy2 = self.dx**2, self.dy**2
+        dt, nu = self.dt, self.nu
+
+        # Use 0.5*dt for Crank-Nicolson
+        rx = 0.5 * nu * dt / dx2
+        ry = 0.5 * nu * dt / dy2
+
+        # --- u matrix: (Nx-1)*(Ny-2) unknowns ---
+        n_u = (Nx - 1) * (Ny - 2)
+        Au = lil_matrix((n_u, n_u))
+
+        for i in range(1, Nx):
+            for j in range(1, Ny - 1):
+                k = (i - 1) * (Ny - 2) + (j - 1)
+                diag = 1.0 + 2.0 * rx + 2.0 * ry
+
+                if i > 1:
+                    Au[k, k - (Ny - 2)] = -rx
+                if i < Nx - 1:
+                    Au[k, k + (Ny - 2)] = -rx
+                if j > 1:
+                    Au[k, k - 1] = -ry
+                if j < Ny - 2:
+                    Au[k, k + 1] = -ry
+
+                Au[k, k] = diag
+
+        self.A_diff_u = Au.tocsr()
+
+        # --- v matrix: Nx*(Ny-1) unknowns ---
+        n_v = Nx * (Ny - 1)
+        Av = lil_matrix((n_v, n_v))
+
+        for i in range(Nx):
+            for j in range(1, Ny):
+                k = i * (Ny - 1) + (j - 1)
+                diag = 1.0 + 2.0 * ry
+
+                # x-direction — antisymmetric ghost at i=0 and i=Nx-1
+                if i == 0:
+                    diag += rx  # ghost: v[-1,j] = -v[0,j]
+                elif i > 0:
+                    Av[k, k - (Ny - 1)] = -rx
+
+                if i == Nx - 1:
+                    diag += rx  # ghost: v[Nx,j] = -v[Nx-1,j]
+                elif i < Nx - 1:
+                    Av[k, k + (Ny - 1)] = -rx
+
+                # y-direction — Dirichlet at j=0 and j=Ny
+                if j > 1:
+                    Av[k, k - 1] = -ry
+                if j < Ny - 1:
+                    Av[k, k + 1] = -ry
+
+                Av[k, k] = diag
+
+        self.A_diff_v = Av.tocsr()
 
     def _set_bc(self, u, v):
         """Set velocity boundary conditions on the given arrays.
@@ -167,6 +234,61 @@ class StaggeredSolver:
 
         return adv_u, adv_v
 
+    def _implicit_diffusion(self, u, v, adv_u, adv_v):
+        """Crank-Nicolson semi-implicit diffusion: (I - 0.5*dt*nu*L) u* = u - dt*adv + 0.5*dt*nu*L(u).
+
+        Returns u_star, v_star with BCs applied.
+        """
+        Nx, Ny = self.Nx, self.Ny
+        dx, dy = self.dx, self.dy
+        dx2, dy2 = dx**2, dy**2
+        nu, dt = self.nu, self.dt
+
+        u_star = u.copy()
+        v_star = v.copy()
+
+        # --- Explicit Laplacian of u at interior faces i=1..Nx-1, j=1..Ny-2 ---
+        lap_u = np.zeros_like(u)
+        lap_u[1:-1, :] = (u[2:, :] - 2 * u[1:-1, :] + u[:-2, :]) / dx2
+        if u.shape[1] > 2:
+            lap_u[:, 1:-1] += (u[:, 2:] - 2 * u[:, 1:-1] + u[:, :-2]) / dy2
+
+        # --- Explicit Laplacian of v at all i, interior j=1..Ny-1 ---
+        lap_v = np.zeros_like(v)
+        lap_v[1:-1, :] = (v[2:, :] - 2 * v[1:-1, :] + v[:-2, :]) / dx2
+        # Ghost points for antisymmetric BC at x-walls
+        lap_v[0, :] += (v[1, :] - 2 * v[0, :] + (-v[0, :])) / dx2
+        lap_v[-1, :] += (v[-2, :] - 2 * v[-1, :] + (-v[-1, :])) / dx2
+        if v.shape[1] > 2:
+            lap_v[:, 1:-1] += (v[:, 2:] - 2 * v[:, 1:-1] + v[:, :-2]) / dy2
+
+        # --- u: RHS = u - dt*adv + 0.5*dt*nu*L(u) ---
+        rhs_u = u[1:-1, 1:-1] - dt * adv_u[1:-1, 1:-1] + 0.5 * dt * nu * lap_u[1:-1, 1:-1]
+
+        # Dirichlet boundary contributions from implicit part: 0.5*dt*nu * BC / dx2
+        rhs_u[0, :] += 0.5 * nu * dt * self.u_left / dx2
+        rhs_u[-1, :] += 0.5 * nu * dt * self.u_right / dx2
+        rhs_u[:, 0] += 0.5 * nu * dt * self.u_bottom / dy2
+        rhs_u[:, -1] += 0.5 * nu * dt * self.u_top / dy2
+
+        u_flat, info = cg(self.A_diff_u, rhs_u.flatten(), maxiter=1000, rtol=1e-5)
+        if info != 0:
+            raise RuntimeError(f"u diffusion CG failed (info={info})")
+        u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny - 2))
+
+        # --- v: RHS = v - dt*adv + 0.5*dt*nu*L(v) ---
+        rhs_v = v[:, 1:-1] - dt * adv_v[:, 1:-1] + 0.5 * dt * nu * lap_v[:, 1:-1]
+
+        # Dirichlet contributions at j=0 and j=Ny (both zero, so nothing to add)
+
+        v_flat, info = cg(self.A_diff_v, rhs_v.flatten(), maxiter=1000, rtol=1e-5)
+        if info != 0:
+            raise RuntimeError(f"v diffusion CG failed (info={info})")
+        v_star[:, 1:-1] = v_flat.reshape((Nx, Ny - 1))
+
+        self._set_bc(u_star, v_star)
+        return u_star, v_star
+
     def step(self):
         """Advance one time step (Chorin projection)."""
         Nx, Ny = self.Nx, self.Ny
@@ -177,41 +299,9 @@ class StaggeredSolver:
         u = self.u
         v = self.v
 
-        # --- Predictor: u* = u + dt*(advection + diffusion) ---
-        u_star = u.copy()
-        v_star = v.copy()
-
+        # --- Predictor: advection + implicit diffusion ---
         adv_u, adv_v = self._advection(u, v)
-        u_star -= dt * adv_u
-        v_star -= dt * adv_v
-
-        # u diffusion — interior faces i=1..Nx-1, all j
-        lap_u_x = (u[2:, :] - 2 * u[1:-1, :] + u[:-2, :]) / dx**2
-        lap_u_y = np.zeros_like(lap_u_x)
-        if u.shape[1] > 2:
-            lap_u_y[:, 1:-1] = (
-                (u[1:-1, 2:] - 2 * u[1:-1, 1:-1] + u[1:-1, :-2]) / dy**2
-            )
-        u_star[1:-1, :] += nu * dt * (lap_u_x + lap_u_y)
-
-        # v diffusion — all i, interior j=1..Ny-1
-        if v.shape[0] > 2 and v.shape[1] > 2:
-            lap_v_x = np.zeros_like(v)
-            lap_v_x[1:-1, :] = (
-                (v[2:, :] - 2 * v[1:-1, :] + v[:-2, :]) / dx**2
-            )
-            lap_v_x[0, :] = (v[1, :] - 3 * v[0, :]) / dx**2
-            lap_v_x[-1, :] = (v[-2, :] - 3 * v[-1, :]) / dx**2
-
-            lap_v_y = np.zeros_like(v)
-            lap_v_y[:, 1:-1] = (
-                (v[:, 2:] - 2 * v[:, 1:-1] + v[:, :-2]) / dy**2
-            )
-
-            v_star[:, 1:-1] += nu * dt * (lap_v_x + lap_v_y)[:, 1:-1]
-
-        # Enforce BCs on predictor before divergence
-        self._set_bc(u_star, v_star)
+        u_star, v_star = self._implicit_diffusion(u, v, adv_u, adv_v)
 
         # --- Pressure Poisson: div(u*)/dt = Lap(p) ---
         div = (
@@ -221,9 +311,9 @@ class StaggeredSolver:
         rhs = (-div / dt).flatten()
         rhs[0] = 0.0
 
-        p_flat, info = cg(self.A, rhs)
+        p_flat, info = cg(self.A, rhs, maxiter=1000, rtol=1e-5)
         if info != 0:
-            raise RuntimeError(f"CG solver failed to converge (info={info})")
+            raise RuntimeError(f"Pressure CG failed to converge (info={info})")
         self.p = p_flat.reshape((Nx, Ny))
         self.p -= np.mean(self.p)
 
