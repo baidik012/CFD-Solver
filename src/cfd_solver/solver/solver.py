@@ -52,7 +52,6 @@ class Solver:
 
         # Fix one pressure value to remove the Neumann nullspace while
         # keeping the matrix symmetric for conjugate gradient.
-        A[0, 0] = 1.0
         A[0, :] = 0.0
         A[:, 0] = 0.0
         A[0, 0] = 1.0
@@ -110,7 +109,6 @@ class Solver:
 
     def _laplacian(self, u, dx, dy):
         """Compute Laplacian using central differences with boundary conditions."""
-        Nx, Ny = self.grid.Nx, self.grid.Ny
         lap = np.zeros_like(u)
         
         # Interior points: standard 5-point stencil
@@ -151,14 +149,9 @@ class Solver:
         self.bc.apply(u_star, v_star)
 
         # --- Poisson: pressure correction ---
-        # Compute divergence at cell centers from face velocities
-        # u_star shape: (Nx+1, Ny), v_star shape: (Nx, Ny+1)
-        # Divergence at cell centers: du/dx + dv/dy
-        div = np.zeros(self.grid.shape_p)  # (Nx, Ny)
-        # du/dx at cell centers using u at faces
-        div[:, :] = (
-            (u_star[1:, :] - u_star[:-1, :]) / dx +  # du/dx
-            (v_star[:, 1:] - v_star[:, :-1]) / dy    # dv/dy
+        div = (
+            (u_star[1:, :] - u_star[:-1, :]) / dx +
+            (v_star[:, 1:] - v_star[:, :-1]) / dy
         )
 
         # Pressure Poisson equation: nabla^2 p = div / dt.
@@ -176,20 +169,13 @@ class Solver:
 
         # --- Corrector: apply pressure gradient ---
         # Pressure gradient at face locations
-        # dp/dx at u-faces: use p[i+1,j] - p[i,j], shape (Nx, Ny) -> (9, 10) for Nx=10,Ny=10
-        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx  # shape (Nx, Ny)
-        # dp/dy at v-faces: use p[i,j+1] - p[i,j], shape (Nx, Ny) -> (10, 9) for Nx=10,Ny=10
-        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy  # shape (Nx, Ny)
+        # dp/dx at u-faces: p[i+1,j] - p[i,j], shape (Nx-1, Ny)
+        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx
+        # dp/dy at v-faces: p[i,j+1] - p[i,j], shape (Nx, Ny-1)
+        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy
 
         # Update interior u and v
-        # u[1:-1, 1:-1] has shape (Nx-1, Ny-2) = (9, 8)
-        # grad_p_x is (Nx, Ny) = (10, 10), wait no: p is (10,10), so grad_p_x is (9, 10)
-        # grad_p_x[:, 1:-1] -> (9, 8) ✓
         u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x[:, 1:-1]
-        
-        # v[1:-1, 1:-1] has shape (Nx-2, Ny-1) = (8, 9)
-        # grad_p_y is (Nx, Ny-1) = (10, 9)
-        # grad_p_y[1:-1, :] -> (8, 9) ✓
         v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y[1:-1, :]
 
         # Re-apply boundaries
@@ -199,7 +185,7 @@ class Solver:
         """Run the simulation."""
         for i in range(steps):
             self.step()
-            if verbose and i % 100 == 0:
+            if verbose and i % max(1, steps // 10) == 0:
                 div = self.divergence(interior_only=True)
                 print(f"Step {i}: max |∇·u| = {div:.6e}")
 

@@ -10,32 +10,24 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     if skip is None:
-        try:
-            skip = max(1, grid.Nx // 32)
-        except Exception:
-            skip = 1
+        skip = max(1, min(grid.Nx, grid.Ny) // 32)
 
     fig, ax = plt.subplots(figsize=(6, 5))
 
-    X = getattr(grid, 'X', None)
-    Y = getattr(grid, 'Y', None)
-
-    if X is not None and Y is not None:
-        Xp = X[::skip, ::skip]
-        Yp = Y[::skip, ::skip]
-    else:
-        xi = np.arange(u.shape[0])
-        yi = np.arange(u.shape[1])
-        Xidx, Yidx = np.meshgrid(xi, yi)
-        Xp, Yp = Xidx[::skip, ::skip], Yidx[::skip, ::skip]
-
+    # Interpolate face velocities to cell centers for plotting
     if u.shape == grid.shape_u and v.shape == grid.shape_v:
-        U_full = 0.5 * (u[1:, :] + u[:-1, :])
+        U_full = 0.5 * (u[1:, :] + u[:-1, :])  # shape (Nx, Ny)
         V_full = 0.5 * (v[:, 1:] + v[:, :-1])
     else:
         U_full = u
         V_full = v
 
+    # Cell-center coordinates (Nx, Ny) — transposed to match U/V shape
+    X = grid.X
+    Y = grid.Y
+
+    Xp = X[::skip, ::skip]
+    Yp = Y[::skip, ::skip]
     U = U_full[::skip, ::skip]
     V = V_full[::skip, ::skip]
 
@@ -81,7 +73,6 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    Nx = solver.Nx
     fields = _cell_center_plot_fields(solver)
     X = fields["X"]
     Y = fields["Y"]
@@ -92,6 +83,11 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
+    # Prepare mask overlay once if needed
+    if cell_mask is not None:
+        solid_mask = (~cell_mask).astype(float).T
+        mask_kw = dict(levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+
     # Pressure contours
     ax = axes[0]
     cf = ax.contourf(X, Y, pressure, levels=100, cmap='RdBu_r')
@@ -100,17 +96,14 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     ax.set_title("Pressure Field")
     ax.set_aspect("equal")
     plt.colorbar(cf, ax=ax, label="p")
-    
-    # If mask provided, overlay solid regions with gray hatch
     if cell_mask is not None:
-        solid_mask = (~cell_mask).astype(float).T
-        ax.contourf(X, Y, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+        ax.contourf(X, Y, solid_mask, **mask_kw)
 
     # Velocity field
     ax = axes[1]
     cf = ax.contourf(X, Y, speed, levels=100, cmap='viridis')
     if skip is None:
-        skip = max(1, Nx // 32)
+        skip = max(1, min(solver.Nx, solver.Ny) // 32)
     ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
               u_center[::skip, ::skip], v_center[::skip, ::skip],
               color='white', alpha=0.7, scale=scale)
@@ -119,10 +112,8 @@ def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
     ax.set_title("Velocity Magnitude")
     ax.set_aspect("equal")
     plt.colorbar(cf, ax=ax, label="|u|")
-    
-    # If mask provided, overlay solid regions with gray
     if cell_mask is not None:
-        ax.contourf(X, Y, solid_mask, levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+        ax.contourf(X, Y, solid_mask, **mask_kw)
 
     plt.tight_layout()
     plt.savefig(path)
