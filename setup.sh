@@ -52,5 +52,5 @@ echo "    ./run.sh"
 echo
 echo "Or manually:"
 echo "    source venv/bin/activate"
-echo "    python3 examples/staggered_cavity.py"
+echo "    python3 examples/lid_cavity.py"
 echo

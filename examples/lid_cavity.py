@@ -1,6 +1,7 @@
 """Lid-driven cavity example (YAML-configurable).
 
 Run: python3 examples/lid_cavity.py --config examples/lid_cavity.yaml
+     python3 examples/lid_cavity.py --output output/custom.png
 """
 
 import os
@@ -12,8 +13,11 @@ from cfd_solver.solver.viz import save_contour
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", "-c", default="examples/lid_cavity.yaml")
+    parser = argparse.ArgumentParser(description="Run a lid-driven cavity simulation")
+    parser.add_argument("--config", "-c", default="examples/lid_cavity.yaml",
+                        help="YAML config file (default: examples/lid_cavity.yaml)")
+    parser.add_argument("--output", "-o", default="output/lid_cavity.png",
+                        help="Output plot path (default: output/lid_cavity.png)")
     args = parser.parse_args()
 
     defaults = {
@@ -44,9 +48,9 @@ def main():
     )
     solver.solve(cfg["steps"], verbose=True)
 
-    os.makedirs("output", exist_ok=True)
-    save_contour(solver.mesh, solver.u, solver.v, solver.p, "output/lid_cavity.png")
-    print("Saved output/lid_cavity.png")
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
+    print(f"Saved {args.output}")
 
 
 if __name__ == "__main__":

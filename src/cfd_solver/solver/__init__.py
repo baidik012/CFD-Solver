@@ -6,6 +6,7 @@ from .solver import Solver
 from . import advection
 from .diffusion import CrankNicolson, explicit
 from .pressure import PressureSolver
+from .validate import validate_config
 from . import diagnostics
 from .viz import save_quiver, save_contour
 
@@ -17,6 +18,7 @@ __all__ = [
     "CrankNicolson",
     "explicit",
     "PressureSolver",
+    "validate_config",
     "diagnostics",
     "save_quiver",
     "save_contour",

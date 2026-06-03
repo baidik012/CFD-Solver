@@ -59,6 +59,6 @@ echo     run.bat
 echo.
 echo Or manually:
 echo     venv\Scripts\activate
-echo     python examples\staggered_cavity.py
+echo     python examples\lid_cavity.py
 echo.
 pause

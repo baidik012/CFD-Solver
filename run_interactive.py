@@ -7,6 +7,33 @@ import subprocess
 import yaml
 
 
+_FRIENDLY_ERRORS = {
+    ModuleNotFoundError: (
+        "Missing required package. Run:\n"
+        "  pip install -r requirements.txt\n"
+        "or:\n"
+        "  pip install -e ."
+    ),
+    MemoryError: "Not enough memory. Try a smaller grid size.",
+}
+
+
+def _handle_error(exc):
+    """Print a user-friendly message and exit."""
+    print("\n" + "=" * 50)
+    print("  ERROR")
+    print("=" * 50)
+
+    msg = _FRIENDLY_ERRORS.get(type(exc))
+    if msg:
+        print(f"  {msg}")
+    else:
+        print(f"  {type(exc).__name__}: {exc}")
+
+    print("=" * 50 + "\n")
+    raise SystemExit(1)
+
+
 def ask(prompt, default):
     """Prompt user for input, return default if empty."""
     val = input(f"  {prompt} [{default}]: ").strip()
@@ -37,14 +64,20 @@ def main():
     print("  Running solver...")
     print()
 
-    from cfd_solver.solver import Solver
-    from cfd_solver.solver.viz import save_contour
+    try:
+        from cfd_solver.solver import Solver
+        from cfd_solver.solver.viz import save_contour
+    except ModuleNotFoundError as exc:
+        _handle_error(exc)
 
-    s = Solver(
-        grid_size=(Nx, Ny), nu=nu, dt=dt,
-        lid_speed=top_u, smooth_lid=smooth_lid,
-    )
-    s.solve(steps, verbose=True)
+    try:
+        s = Solver(
+            grid_size=(Nx, Ny), nu=nu, dt=dt,
+            lid_speed=top_u, smooth_lid=smooth_lid,
+        )
+        s.solve(steps, verbose=True)
+    except Exception as exc:
+        _handle_error(exc)
 
     os.makedirs("output", exist_ok=True)
     out_path = "output/result.png"

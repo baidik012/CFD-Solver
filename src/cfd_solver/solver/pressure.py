@@ -5,7 +5,7 @@ reference pressure, then solves via conjugate gradient.
 """
 
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import diags, eye, kron, csr_matrix
 from scipy.sparse.linalg import cg
 
 
@@ -29,41 +29,30 @@ class PressureSolver:
         self.A = self._build_matrix()
 
     def _build_matrix(self):
-        """Build the positive-Laplacian pressure matrix with Neumann walls."""
+        """Build the positive-Laplacian pressure matrix with Neumann walls.
+
+        Uses Kronecker products of 1D Neumann Laplacians — no Python loops.
+        """
         Nx, Ny = self.Nx, self.Ny
         dx2, dy2 = self.dx**2, self.dy**2
 
-        N = Nx * Ny
-        A = lil_matrix((N, N))
+        # 1D negative Laplacian with Neumann BCs
+        def _neumann_1d(n, h2):
+            diag = np.full(n, 2.0 / h2)
+            diag[0] = 1.0 / h2
+            diag[-1] = 1.0 / h2
+            off = np.full(n - 1, -1.0 / h2)
+            return diags([off, diag, off], [-1, 0, 1], shape=(n, n), format="csr")
 
-        for i in range(Nx):
-            for j in range(Ny):
-                idx = i * Ny + j
-                diag = 2.0 / dx2 + 2.0 / dy2
+        Lx = _neumann_1d(Nx, dx2)
+        Ly = _neumann_1d(Ny, dy2)
 
-                if i > 0:
-                    A[idx, idx - Ny] = -1.0 / dx2
-                else:
-                    diag -= 1.0 / dx2
-
-                if i < Nx - 1:
-                    A[idx, idx + Ny] = -1.0 / dx2
-                else:
-                    diag -= 1.0 / dx2
-
-                if j > 0:
-                    A[idx, idx - 1] = -1.0 / dy2
-                else:
-                    diag -= 1.0 / dy2
-
-                if j < Ny - 1:
-                    A[idx, idx + 1] = -1.0 / dy2
-                else:
-                    diag -= 1.0 / dy2
-
-                A[idx, idx] = diag
+        # 2D Laplacian: k = i*Ny + j ordering
+        A = kron(Lx, eye(Ny, format="csr"), format="csr") + \
+            kron(eye(Nx, format="csr"), Ly, format="csr")
 
         # Pin one pressure value to remove the nullspace
+        A = A.tolil()
         A[0, :] = 0
         A[:, 0] = 0
         A[0, 0] = 1.0

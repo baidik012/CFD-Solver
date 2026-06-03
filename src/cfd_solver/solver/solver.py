@@ -12,6 +12,9 @@ Example
 >>> s.save("output/result.png")
 """
 
+import os
+import sys
+import time
 import numpy as np
 
 from .mesh import Mesh
@@ -159,23 +162,37 @@ class Solver:
 
     def solve(self, steps, verbose=True):
         """Run the simulation for the given number of steps."""
+        t0 = time.time()
         for i in range(steps):
             self.step()
 
             if is_blowup(self.u, self.v):
                 if verbose:
                     print(
-                        f"Step {i:4d}: BLOWUP — velocity is NaN/Inf.\n"
+                        f"\nStep {i:4d}: BLOWUP — velocity is NaN/Inf.\n"
                         f"  Try: smaller dt, smaller lid_speed, or smooth_lid=True."
                     )
                 return
 
-            if verbose and i % max(1, steps // 10) == 0:
-                print(
-                    f"Step {i:4d}: "
-                    f"|div|_inf = {max_divergence(self.u, self.v, self.dx, self.dy):.2e}, "
-                    f"CFL = {cfl(self.u, self.v, self.dx, self.dy, self.dt):.3f}"
+            if verbose:
+                bar_len = 30
+                filled = int(bar_len * (i + 1) / steps)
+                bar = "=" * filled + "-" * (bar_len - filled)
+                elapsed = time.time() - t0
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                eta = (steps - i - 1) / rate if rate > 0 else 0
+                div = max_divergence(self.u, self.v, self.dx, self.dy)
+                c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                sys.stdout.write(
+                    f"\r  [{bar}] {i+1:4d}/{steps}  "
+                    f"|div|={div:.2e}  CFL={c:.3f}  "
+                    f"ETA={eta:.0f}s"
                 )
+                sys.stdout.flush()
+
+        if verbose:
+            elapsed = time.time() - t0
+            sys.stdout.write(f"\n  Done in {elapsed:.1f}s\n")
 
     def divergence_norm(self):
         """RMS divergence."""
@@ -196,3 +213,33 @@ class Solver:
     def save_quiver(self, path, skip=None, scale=None):
         """Save velocity vector plot."""
         _save_quiver(self.mesh, self.u, self.v, path, skip, scale)
+
+    def checkpoint(self, path):
+        """Save solver state to a .npz file for resume later."""
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        np.savez_compressed(
+            path,
+            u=self.u, v=self.v, p=self.p,
+            Nx=self.Nx, Ny=self.Ny,
+            Lx=self.Lx, Ly=self.Ly,
+            dx=self.dx, dy=self.dy,
+            dt=self.dt, nu=self.nu,
+        )
+
+    @classmethod
+    def from_checkpoint(cls, path):
+        """Load a solver from a checkpoint file.
+
+        Returns the Solver instance with u, v, p restored.
+        The diffusion/pressure solvers are rebuilt from saved parameters.
+        """
+        data = np.load(path)
+        Nx, Ny = int(data["Nx"]), int(data["Ny"])
+        Lx, Ly = float(data["Lx"]), float(data["Ly"])
+        dt, nu = float(data["dt"]), float(data["nu"])
+
+        solver = cls(grid_size=(Nx, Ny), nu=nu, dt=dt, Lx=Lx, Ly=Ly)
+        solver.u[:] = data["u"]
+        solver.v[:] = data["v"]
+        solver.p[:] = data["p"]
+        return solver
