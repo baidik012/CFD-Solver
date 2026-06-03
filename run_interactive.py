@@ -69,12 +69,26 @@ def main():
     print(f"  Result saved to {out_path}")
 
     # Try to open the image
+    opened = False
     if sys.platform == "darwin":
         subprocess.run(["open", out_path])
+        opened = True
     elif sys.platform.startswith("linux"):
-        subprocess.run(["xdg-open", out_path])
+        # Try native Linux, then WSL2 → Windows fallback
+        for cmd in [["xdg-open", out_path],
+                     ["explorer.exe", os.path.abspath(out_path)]]:
+            try:
+                subprocess.run(cmd, check=True)
+                opened = True
+                break
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                continue
     elif sys.platform == "win32":
         os.startfile(out_path)
+        opened = True
+
+    if not opened:
+        print(f"  Open output/result.png to view the result.")
 
     # Clean up temp config
     os.remove(config_path)
