@@ -75,142 +75,70 @@ sudo apt install git
 
 ### 2.2 Clone the Repo
 
-If the repo is **public** (recommended):
 ```bash
 git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
 
-If the repo is **private** (you were added as collaborator):
-```bash
-git clone https://github.com/baidik012/CFD-Solver.git
-cd CFD-Solver
-# GitHub will ask for your username and password
-# Use your GitHub username and a Personal Access Token as password
-```
-
-**To create a Personal Access Token:**
-1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
-2. Click "Generate new token (classic)"
-3. Name it something like "CFD Solver"
-4. Check **repo** scope
-5. Click Generate
-6. Copy the token — you won't see it again
-
-When GitHub asks for password, use:
+If the repo is **private**, GitHub will ask for credentials:
 - Username: your GitHub username
-- Password: the token (it looks like `ghp_xxxxxxxxxxxxxxxxxxxx`)
+- Password: a [Personal Access Token](https://github.com/settings/tokens) (not your account password)
 
 ---
 
 ## Part 3: Set Up the Environment
 
-### 3.1 Create a Virtual Environment
-
-A virtual environment keeps this project's dependencies separate from other Python projects. Don't skip this.
-
-```bash
-# From the CFD-Solver directory
-python -m venv venv
-```
-
-This creates a folder called `venv` that contains its own Python installation.
-
----
-
-### 3.2 Activate the Environment
-
-**Windows:**
-```bash
-venv\Scripts\activate
-```
+**Windows** — double-click `setup.bat` in the repo folder.
 
 **Mac/Linux:**
 ```bash
-source venv/bin/activate
+chmod +x setup.sh
+./setup.sh
 ```
 
-You'll know it's active when your prompt shows `(venv)` at the start, like:
-```
-(venv) baidik@MSI:~/CFD-Solver$
-```
-
----
-
-### 3.3 Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-This installs numpy, matplotlib, scipy, etc. — everything the solver needs.
+This creates a virtual environment and installs everything automatically. Takes about a minute.
 
 ---
 
 ## Part 4: Run the Solver
 
-### 4.1 Run the Example
+**Windows** — double-click `run.bat`.
 
+**Mac/Linux:**
 ```bash
-python examples/staggered_cavity.py
+chmod +x run.sh
+./run.sh
 ```
 
-You'll see output like:
+You'll see prompts like:
 ```
-Lid-driven cavity: 128x128 grid, 1000 steps
-
-Step    0: |∇·u|∞ = 5.12e-03, CFL = 0.012
-Step  100: |∇·u|∞ = 4.21e-04, CFL = 0.089
-...
-Step 1000: |∇·u|∞ = 1.33e-06, CFL = 0.152
-Solve time: 0.87s
-Saved output/staggered_result.png
+Grid cells in x [32]:
+Grid cells in y [32]:
+Viscosity (nu) [0.01]:
+Time step (dt) [0.001]:
+Number of steps [200]:
+Lid speed [1.0]:
 ```
 
-It takes a few seconds. Let it finish.
-
----
-
-### 4.2 View the Results
-
-Open the file `output/staggered_result.png`:
-- **Windows:** Double-click it in File Explorer
-- **Mac:** Double-click in Finder
-- **Linux:** Double-click in Files app
-
-You should see two plots:
-- **Left:** Pressure field (red = high, blue = low)
-- **Right:** Velocity magnitude with arrows showing flow direction
+Press **Enter** to accept each default, or type a value to change it. The solver runs and opens the result image automatically.
 
 ---
 
 ## Part 5: Experiment
 
-### 5.1 Change the Parameters
+Just run `run.bat` (or `./run.sh`) again and choose different parameters.
 
-Open `examples/staggered_cavity.py` in a text editor (VS Code, Notepad++, etc.) and change values:
+### What to try
 
-```python
-Nx, Ny = 128, 128  # Try 64 or 256
-nu = 0.01          # Try 0.001 (thinner) or 0.1 (thicker)
-dt = 0.001         # Try 0.0005 (more stable) or 0.002 (faster but risky)
-steps = 1000       # Try 500 (quicker) or 2000 (more settled)
-```
+| Change | Effect |
+|--------|--------|
+| Grid: `64` or `128` | More detail, slower |
+| Viscosity: `0.001` | Thinner fluid, more chaotic |
+| Viscosity: `0.1` | Thicker fluid, smoother |
+| Steps: `500` | Longer simulation |
+| Lid speed: `2.0` | Faster driving, more turbulent |
 
-Save the file and run again.
-
----
-
-### 5.2 What to Try
-
-**Faster lid (more turbulent):**
-Change `u_bc={"top": 1.0}` to `"top": 2.0`
-
-**Lower viscosity (more chaotic):**
-Change `nu=0.01` to `nu=0.001`
-
-**Higher resolution (more detail, slower):**
-Change `Nx, Ny = 128, 128` to `Nx, Ny = 256, 256`
+**Stability rule:** If the solver blows up (values go to infinity), your time step is too large for the viscosity. Reduce `dt` or increase `nu`.
 
 ---
 
@@ -252,9 +180,13 @@ pip install -r requirements.txt
 
 ---
 
-### "Permission denied" or "cannot push"
+### Solver blows up (values go to infinity)
 
-You're trying to push changes but don't have write access. That's fine — you can still run the solver and experiment locally. If you want to contribute, ask the repo owner to add you as a collaborator.
+Your time step is too large for the viscosity. The stability limit is roughly:
+```
+dt <= dx^2 / (4 * nu)
+```
+For a 32x32 grid with `nu=0.01`, use `dt <= 0.001`.
 
 ---
 
@@ -282,13 +214,9 @@ Once you've run a few experiments:
 **Quick reference for next time:**
 
 ```bash
-# Activate environment
-source venv/bin/activate        # Mac/Linux
-# venv\Scripts\activate         # Windows
+# Windows
+run.bat
 
-# Run solver
-python examples/staggered_cavity.py
-
-# View results
-# Open output/staggered_result.png
+# Mac/Linux
+./run.sh
 ```
