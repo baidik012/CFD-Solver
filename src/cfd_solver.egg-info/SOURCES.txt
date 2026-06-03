@@ -9,6 +9,7 @@ src/cfd_solver.egg-info/entry_points.txt
 src/cfd_solver.egg-info/requires.txt
 src/cfd_solver.egg-info/top_level.txt
 src/cfd_solver/cli/__init__.py
+src/cfd_solver/cli/__main__.py
 src/cfd_solver/solver/__init__.py
 src/cfd_solver/solver/boundaries.py
 src/cfd_solver/solver/grid.py

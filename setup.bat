@@ -55,9 +55,10 @@ echo   Setup complete!
 echo ========================================
 echo.
 echo To run the solver:
-echo     python examples\staggered_cavity.py
+echo     run.bat
 echo.
-echo To activate the environment next time:
+echo Or manually:
 echo     venv\Scripts\activate
+echo     python examples\staggered_cavity.py
 echo.
 pause
