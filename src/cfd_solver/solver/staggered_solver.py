@@ -286,7 +286,8 @@ class StaggeredSolver:
 
         u_flat, info = cg(self.A_diff_u, rhs_u.flatten(), maxiter=1000, rtol=1e-5)
         if info != 0:
-            raise RuntimeError(f"u diffusion CG failed (info={info})")
+            self.u[:] = np.nan
+            return u_star, v_star
         u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny - 2))
 
         # --- v: RHS = v - dt*adv + 0.5*dt*nu*L(v) ---
@@ -296,7 +297,8 @@ class StaggeredSolver:
 
         v_flat, info = cg(self.A_diff_v, rhs_v.flatten(), maxiter=1000, rtol=1e-5)
         if info != 0:
-            raise RuntimeError(f"v diffusion CG failed (info={info})")
+            self.u[:] = np.nan
+            return u_star, v_star
         v_star[:, 1:-1] = v_flat.reshape((Nx, Ny - 1))
 
         self._set_bc(u_star, v_star)
@@ -364,10 +366,21 @@ class StaggeredSolver:
             + np.max(np.abs(self.v)) * self.dt / self.dy
         )
 
+    def _blowup_check(self):
+        """Return True if velocity has blown up (NaN or Inf)."""
+        return not (np.all(np.isfinite(self.u)) and np.all(np.isfinite(self.v)))
+
     def solve(self, steps, verbose=True):
         """Run the simulation for the given number of steps."""
         for i in range(steps):
             self.step()
+            if self._blowup_check():
+                if verbose:
+                    print(
+                        f"Step {i:4d}: BLOWUP detected — velocity is NaN/Inf.\n"
+                        f"  Try: smaller dt, smaller lid speed, or smooth_lid=True."
+                    )
+                return
             if verbose and i % max(1, steps // 10) == 0:
                 print(
                     f"Step {i:4d}: "
