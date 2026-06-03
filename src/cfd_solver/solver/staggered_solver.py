@@ -15,7 +15,8 @@ class StaggeredSolver:
     """
 
     def __init__(self, Lx, Ly, Nx, Ny, nu, dt,
-                 u_bc={"top": 1.0, "bottom": 0.0, "left": 0.0, "right": 0.0}):
+                 u_bc={"top": 1.0, "bottom": 0.0, "left": 0.0, "right": 0.0},
+                 smooth_lid=False):
         self.Lx = Lx
         self.Ly = Ly
         self.Nx = Nx
@@ -30,6 +31,12 @@ class StaggeredSolver:
         self.u_bottom = u_bc.get("bottom", 0.0)
         self.u_left = u_bc.get("left", 0.0)
         self.u_right = u_bc.get("right", 0.0)
+
+        self.smooth_lid = smooth_lid
+        if smooth_lid:
+            self.u_lid = self.u_top * np.sin(np.pi * np.arange(Nx + 1) / Nx)
+        else:
+            self.u_lid = None
 
         self.u = np.zeros((Nx + 1, Ny))
         self.v = np.zeros((Nx, Ny + 1))
@@ -159,7 +166,10 @@ class StaggeredSolver:
         u[0, :] = self.u_left
         u[Nx, :] = self.u_right
         u[:, 0] = self.u_bottom
-        u[:, Ny - 1] = self.u_top
+        if self.smooth_lid:
+            u[:, Ny - 1] = self.u_lid
+        else:
+            u[:, Ny - 1] = self.u_top
 
         v[:, 0] = 0.0
         v[:, Ny] = 0.0
@@ -269,7 +279,10 @@ class StaggeredSolver:
         rhs_u[0, :] += 0.5 * nu * dt * self.u_left / dx2
         rhs_u[-1, :] += 0.5 * nu * dt * self.u_right / dx2
         rhs_u[:, 0] += 0.5 * nu * dt * self.u_bottom / dy2
-        rhs_u[:, -1] += 0.5 * nu * dt * self.u_top / dy2
+        if self.smooth_lid:
+            rhs_u[:, -1] += 0.5 * nu * dt * self.u_lid[1:-1] / dy2
+        else:
+            rhs_u[:, -1] += 0.5 * nu * dt * self.u_top / dy2
 
         u_flat, info = cg(self.A_diff_u, rhs_u.flatten(), maxiter=1000, rtol=1e-5)
         if info != 0:

@@ -30,9 +30,10 @@ def main():
     dt = ask("Time step (dt)", 0.001)
     steps = ask("Number of steps", 200)
     top_u = ask("Lid speed", 1.0)
+    smooth_lid = input("  Use smooth lid profile? (y/n) [y]: ").strip().lower() != "n"
 
     print()
-    print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  steps={steps}  |  lid={top_u}")
+    print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  steps={steps}  |  lid={top_u}  |  smooth={smooth_lid}")
     print()
 
     cfg = {
@@ -56,6 +57,7 @@ def main():
     s = StaggeredSolver(
         1.0, 1.0, Nx, Ny, nu, dt,
         u_bc={"top": top_u, "bottom": 0.0, "left": 0.0, "right": 0.0},
+        smooth_lid=smooth_lid,
     )
     s.solve(steps, verbose=True)
 
