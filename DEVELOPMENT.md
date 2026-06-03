@@ -37,6 +37,7 @@ CFD-Solver/
 - Arakawa C-grid (prevents odd-even decoupling)
 - Adams-Bashforth time integration (2nd order)
 - QUICK advection (3rd order)
+- Crank-Nicolson semi-implicit diffusion (unconditionally stable)
 - Conjugate gradient + sparse matrix for pressure
 
 Use the staggered solver for actual projects.
@@ -143,12 +144,17 @@ v_center at y=0.5 should match published results
 
 ## Stability Limits
 
-Explicit diffusion has a stability limit:
-```
-dt <= dx² / (4 * nu)
-```
+**Diffusion:** Crank-Nicolson semi-implicit scheme is unconditionally stable for any dt. No diffusion stability constraint.
 
-For a 32x32 grid (`dx = 1/32 ≈ 0.031`) with `nu = 0.01`, the limit is `dt ≈ 0.0024`. Exceeding this causes the solver to blow up.
+**Advection:** The 1st-order upwind advection is conditionally stable. At finer grids, the numerical dissipation per cell decreases, which can cause instabilities at high resolution. Practical limits:
+
+| Grid | Max stable dt | Notes |
+|------|--------------|-------|
+| 32×32 | Any (tested to 0.1) | Fully stable |
+| 64×64 | ~0.001 for 100+ steps | Advection limits long runs |
+| 128×128 | ~0.001 for ~30 steps | Advection instability earlier |
+
+To improve stability at high resolution: reduce dt, increase nu, or use a higher-order advection scheme.
 
 ## Physics Conventions
 

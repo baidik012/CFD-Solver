@@ -138,7 +138,7 @@ Just run `run.bat` (or `./run.sh`) again and choose different parameters.
 | Steps: `500` | Longer simulation |
 | Lid speed: `2.0` | Faster driving, more turbulent |
 
-**Stability rule:** If the solver blows up (values go to infinity), your time step is too large for the viscosity. Reduce `dt` or increase `nu`.
+**Stability rule:** If the solver blows up (values go to infinity), reduce the time step or increase viscosity. The diffusion scheme is stable for any dt, but the advection can become unstable at fine grids with large time steps.
 
 ---
 
@@ -182,11 +182,10 @@ pip install -r requirements.txt
 
 ### Solver blows up (values go to infinity)
 
-Your time step is too large for the viscosity. The stability limit is roughly:
-```
-dt <= dx^2 / (4 * nu)
-```
-For a 32x32 grid with `nu=0.01`, use `dt <= 0.001`.
+The diffusion scheme is stable for any dt, but the advection can become unstable at fine grids. Try:
+- Reduce `dt` (e.g., 0.0005 instead of 0.001)
+- Reduce grid size (e.g., 64x64 instead of 128x128)
+- Increase `nu` (more viscous fluid is easier to simulate)
 
 ---
 
