@@ -54,9 +54,8 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 **Staggered Grid (Arakawa C-grid)** — velocities at cell faces, pressure at centers. This eliminates the pressure oscillations that plague simpler grids.
 
 **Numerical schemes:**
-- Advection: QUICK (3rd order)
-- Diffusion: 2nd order central difference
-- Time: Adams-Bashforth (2nd order)
+- Advection: upwind (1st order) or central (2nd order) — pluggable
+- Diffusion: Crank-Nicolson semi-implicit (unconditionally stable) or explicit Euler
 - Pressure: Conjugate gradient with sparse matrix
 
 | Term | What it means |
@@ -64,7 +63,7 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 | C-grid | Staggered arrangement: u/v at faces, p at centers |
 | Projection | Guess first, fix the pressure later |
 | Divergence-free | Fluid coming in must go out |
-| QUICK | Better accuracy than upwind, doesn't overshoot |
+| Crank-Nicolson | Semi-implicit diffusion, stable for any dt |
 
 ---
 
@@ -72,24 +71,27 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 ```
 CFD-Solver/
-├── src/cfd_solver/         # The solver package
-│   ├── solver/             # Core modules
-│   │   ├── grid.py         # Staggered C-grid
-│   │   ├── staggered_solver.py  # Production solver
-│   │   ├── solver.py       # Simple solver (for learning)
-│   │   ├── boundaries.py   # Boundary conditions
-│   │   └── viz.py          # Plotting
-│   └── cli/                # Command-line interface
-├── examples/                # Ready-to-run simulations
-├── output/                  # Results and plots
-├── tests/                   # Unit tests
-├── run_interactive.py       # Interactive parameter setup + solver launch
-├── setup.bat                # Windows setup
-├── setup.sh                 # Mac/Linux setup
-├── run.bat                  # Windows one-click run
-├── run.sh                   # Mac/Linux one-click run
-├── pyproject.toml           # Package configuration
-└── requirements.txt         # Dependencies
+├── src/cfd_solver/             # The solver package
+│   ├── solver/
+│   │   ├── mesh.py             # Staggered grid generation
+│   │   ├── bc.py               # Boundary conditions
+│   │   ├── advection.py        # Upwind & central difference schemes
+│   │   ├── diffusion.py        # Explicit Euler & Crank-Nicolson
+│   │   ├── pressure.py         # Poisson solver (CG + sparse matrix)
+│   │   ├── diagnostics.py      # CFL, divergence, blowup detection
+│   │   ├── projection.py       # Chorin step orchestration
+│   │   ├── solver.py           # Public API (Solver class)
+│   │   └── viz.py              # Visualization (quiver + contour)
+│   └── cli/
+│       └── __init__.py         # CLI entry point
+├── examples/                    # Ready-to-run simulations
+├── output/                      # Results and plots
+├── tests/                       # Unit tests (25 tests)
+├── run_interactive.py           # Interactive parameter setup
+├── setup.bat / setup.sh         # One-click environment setup
+├── run.bat / run.sh             # One-click solver launcher
+├── pyproject.toml               # Package configuration
+└── requirements.txt             # Dependencies
 ```
 
 ---

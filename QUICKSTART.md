@@ -118,6 +118,7 @@ Viscosity (nu) [0.01]:
 Time step (dt) [0.001]:
 Number of steps [200]:
 Lid speed [1.0]:
+Use smooth lid profile? (y/n) [y]:
 ```
 
 Press **Enter** to accept each default, or type a value to change it. The solver runs and opens the result image automatically.
@@ -137,8 +138,9 @@ Just run `run.bat` (or `./run.sh`) again and choose different parameters.
 | Viscosity: `0.1` | Thicker fluid, smoother |
 | Steps: `500` | Longer simulation |
 | Lid speed: `2.0` | Faster driving, more turbulent |
+| Smooth lid: `n` | Step-function lid (corner singularity) |
 
-**Stability rule:** If the solver blows up (values go to infinity), reduce the time step or increase viscosity. The diffusion scheme is stable for any dt, but the advection can become unstable at fine grids with large time steps.
+**Stability rule:** If the solver blows up (values go to infinity), reduce the time step or increase viscosity. The Crank-Nicolson diffusion is stable for any dt, but the advection can become unstable at fine grids with large time steps.
 
 ---
 
@@ -182,10 +184,11 @@ pip install -r requirements.txt
 
 ### Solver blows up (values go to infinity)
 
-The diffusion scheme is stable for any dt, but the advection can become unstable at fine grids. Try:
+The Crank-Nicolson diffusion is stable for any dt, but the advection can become unstable at fine grids. Try:
 - Reduce `dt` (e.g., 0.0005 instead of 0.001)
 - Reduce grid size (e.g., 64x64 instead of 128x128)
 - Increase `nu` (more viscous fluid is easier to simulate)
+- Use smooth lid (default: yes) — removes corner singularity
 
 ---
 
@@ -205,7 +208,7 @@ Once you've run a few experiments:
 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) to understand how the solver works
 2. Look at the code in `src/cfd_solver/solver/` — it's meant to be readable
-3. Try adding a new parameter or boundary condition
+3. Try adding a new advection scheme or boundary condition
 4. Run the divergence check — it should be near zero if things are working
 
 ---

@@ -3,8 +3,8 @@
 import argparse
 import os
 import yaml
-from cfd_solver.solver import Grid, Solver, StaggeredSolver, BoundaryConditions
-from cfd_solver.solver.viz import save_velocity_plot, save_velocity_contour
+from cfd_solver.solver import Solver
+from cfd_solver.solver.viz import save_contour, save_quiver
 
 
 def run(args):
@@ -25,22 +25,16 @@ def run(args):
     bc_cfg = cfg.get("boundary", {})
     top = bc_cfg.get("top", {})
     top_u = top.get("u", 1.0)
+    smooth = bc_cfg.get("smooth_lid", True)
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    if args.solver == "staggered":
-        solver = StaggeredSolver(
-            Lx, Ly, Nx, Ny, nu, dt,
-            u_bc={"top": top_u, "bottom": 0.0, "left": 0.0, "right": 0.0},
-        )
-        solver.solve(steps, verbose=True)
-        save_velocity_contour(solver, args.output)
-    else:
-        grid = Grid(Lx, Ly, Nx, Ny)
-        bc = BoundaryConditions(top_u=top_u)
-        solver = Solver(grid, nu, dt, bc)
-        solver.solve(steps, verbose=True)
-        save_velocity_plot(grid, solver.u, solver.v, args.output)
+    solver = Solver(
+        grid_size=(Nx, Ny), nu=nu, dt=dt, lid_speed=top_u,
+        smooth_lid=smooth, Lx=Lx, Ly=Ly,
+    )
+    solver.solve(steps, verbose=True)
+    save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
 
     print(f"Saved to {args.output}")
 
@@ -51,10 +45,6 @@ def main():
 
     run_parser = sub.add_parser("run", help="Run a simulation")
     run_parser.add_argument("config", help="YAML config file")
-    run_parser.add_argument(
-        "--solver", choices=["staggered", "original"], default="staggered",
-        help='Solver backend (default: staggered)',
-    )
     run_parser.add_argument(
         "--output", "-o", default="output/result.png",
         help="Output plot path (default: output/result.png)",

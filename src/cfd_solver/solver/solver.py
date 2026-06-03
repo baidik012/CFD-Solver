@@ -1,204 +1,198 @@
-"""Chorin projection method solver."""
+"""Incompressible Navier-Stokes solver using Chorin's projection method.
+
+This is the main public API. It wires together the mesh, boundary conditions,
+advection, diffusion, pressure solver, and diagnostics into a single Solver
+class with a clean interface.
+
+Example
+-------
+>>> from cfd_solver.solver import Solver
+>>> s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0)
+>>> s.solve(200)
+>>> s.save("output/result.png")
+"""
 
 import numpy as np
-from scipy.sparse import lil_matrix
-from scipy.sparse.linalg import cg
-from .boundaries import BoundaryConditions
-from .grid import Grid
+
+from .mesh import Mesh
+from .bc import BoundaryConditions
+from . import advection
+from .diffusion import CrankNicolson
+from .pressure import PressureSolver
+from .diagnostics import (
+    divergence as _divergence,
+    divergence_norm,
+    max_divergence,
+    cfl,
+    is_blowup,
+)
+from .viz import save_quiver as _save_quiver, save_contour
+
+
+# Default CG solver settings
+DEFAULT_CG_MAXITER = 1000
+DEFAULT_CG_RTOL = 1e-5
 
 
 class Solver:
-    """Incompressible Navier-Stokes solver using Chorin's method."""
+    """Incompressible Navier-Stokes solver.
 
-    def __init__(self, grid: Grid, nu: float, dt: float, bc: BoundaryConditions):
-        self.grid = grid
-        self.nu = nu
+    Parameters
+    ----------
+    grid_size : tuple[int, int]
+        (Nx, Ny) number of cells.
+    nu : float
+        Kinematic viscosity.
+    dt : float
+        Time step.
+    lid_speed : float, optional
+        u-velocity on the top wall. Default 1.0.
+    smooth_lid : bool, optional
+        Use sinusoidal lid profile to avoid corner singularity. Default True.
+    advection_scheme : str, optional
+        "upwind" (default) or "central".
+    diffusion_scheme : str, optional
+        "crank_nicolson" (default) or "explicit".
+    Lx, Ly : float, optional
+        Domain size. Default 1.0 (unit square).
+    cg_maxiter : int, optional
+        Max CG iterations. Default 1000.
+    cg_rtol : float, optional
+        CG relative tolerance. Default 1e-5.
+    """
+
+    def __init__(self, grid_size, nu, dt, lid_speed=1.0, smooth_lid=True,
+                 advection_scheme="upwind", diffusion_scheme="crank_nicolson",
+                 Lx=1.0, Ly=1.0, cg_maxiter=DEFAULT_CG_MAXITER,
+                 cg_rtol=DEFAULT_CG_RTOL):
+        Nx, Ny = grid_size
+
+        self.mesh = Mesh(Lx, Ly, Nx, Ny)
+        self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
         self.dt = dt
-        self.bc = bc
+        self.nu = nu
 
-        # Use staggered grid dimensions from grid
-        self.u = np.zeros(grid.shape_u)  # (Nx+1, Ny)
-        self.v = np.zeros(grid.shape_v)  # (Nx, Ny+1)
-        self.p = np.zeros(grid.shape_p)  # (Nx, Ny)
+        # Velocity and pressure arrays
+        self.u = np.zeros(self.mesh.shape_u)
+        self.v = np.zeros(self.mesh.shape_v)
+        self.p = np.zeros(self.mesh.shape_p)
 
-        self._build_pressure_matrix()
-        bc.apply(self.u, self.v)
+        # Select advection scheme
+        if advection_scheme == "upwind":
+            self._advection_fn = advection.upwind
+        elif advection_scheme == "central":
+            self._advection_fn = advection.central
+        else:
+            raise ValueError(f"Unknown advection scheme: {advection_scheme}")
 
-    def _build_pressure_matrix(self):
-        """Build positive -Laplacian pressure matrix with Neumann walls."""
-        Nx, Ny = self.grid.Nx, self.grid.Ny
-        dx2, dy2 = self.grid.dx**2, self.grid.dy**2
-        A = lil_matrix((Nx * Ny, Nx * Ny))
+        # Build diffusion solver
+        if diffusion_scheme == "crank_nicolson":
+            self._diffusion = CrankNicolson(
+                self.mesh, nu, dt, self.bc,
+                cg_maxiter=cg_maxiter, cg_rtol=cg_rtol,
+            )
+        elif diffusion_scheme == "explicit":
+            self._diffusion = None
+        else:
+            raise ValueError(f"Unknown diffusion scheme: {diffusion_scheme}")
 
-        for i in range(Nx):
-            for j in range(Ny):
-                idx = i * Ny + j
-                diag = 0.0
-
-                if i > 0:
-                    A[idx, idx - Ny] = -1.0 / dx2
-                    diag += 1.0 / dx2
-                if i < Nx - 1:
-                    A[idx, idx + Ny] = -1.0 / dx2
-                    diag += 1.0 / dx2
-                if j > 0:
-                    A[idx, idx - 1] = -1.0 / dy2
-                    diag += 1.0 / dy2
-                if j < Ny - 1:
-                    A[idx, idx + 1] = -1.0 / dy2
-                    diag += 1.0 / dy2
-
-                A[idx, idx] = diag
-
-        # Fix one pressure value to remove the Neumann nullspace while
-        # keeping the matrix symmetric for conjugate gradient.
-        A[0, :] = 0.0
-        A[:, 0] = 0.0
-        A[0, 0] = 1.0
-        self.pressure_matrix = A.tocsr()
-
-    def _advection(self, u, v, dx, dy):
-        """Compute advection terms (u*du/dx + v*du/dy) for u-momentum and
-        (u*dv/dx + v*dv/dy) for v-momentum at cell centers.
-
-        On a staggered grid, u is at x-faces (Nx+1, Ny) and v is at y-faces (Nx, Ny+1).
-        Advection must be computed at cell centers, requiring interpolation from faces.
-        """
-        # For u-momentum at u-faces (i+1/2, j), interior is [1:-1, 1:-1] -> shape (Nx-1, Ny-2)
-        # Note: u has shape (Nx+1, Ny), so interior [1:-1, 1:-1] removes 2 rows in x and 2 in y,
-        # giving (Nx+1-2, Ny-2) = (Nx-1, Ny-2). We compute advection_u with this shape.
-        
-        # dudx at u-faces using central difference
-        # u is at (i+1/2, j), so dudx at (i+1/2, j) uses u[i+3/2] - u[i-1/2] / (2*dx)
-        # In array indices: dudx[i,j] = (u[i+2,j] - u[i,j]) / (2*dx) for i in [1:-1]
-        dudx = (u[2:, 1:-1] - u[:-2, 1:-1]) / (2 * dx)  # shape (Nx-1, Ny-2)
-        
-        # dudy at u-faces: need du/dy at (i+1/2, j)
-        # Use central diff: dudy[i,j] = (u[i,j+1] - u[i,j-1]) / (2*dy)
-        dudy = (u[1:-1, 2:] - u[1:-1, :-2]) / (2 * dy)  # shape (Nx-1, Ny-2)
-        
-        # Interpolate v to u-faces from the four surrounding v-face values.
-        v_at_u = 0.25 * (
-            v[:-1, 1:-2] + v[1:, 1:-2] +
-            v[:-1, 2:-1] + v[1:, 2:-1]
+        # Build pressure solver
+        self._pressure = PressureSolver(
+            self.mesh, cg_maxiter=cg_maxiter, cg_rtol=cg_rtol,
         )
-        
-        # u velocity at u interior points
-        u_adv = u[1:-1, 1:-1]  # (Nx-1, Ny-2)
-        
-        advection_u = u_adv * dudx + v_at_u * dudy
 
-        # For v-momentum at v-faces (i, j+1/2)
-        # v shape: (Nx, Ny+1), interior [1:-1, 1:-1] -> (Nx-2, Ny-1)
-        
-        # dvdx at v interior
-        dvdx = (v[2:, 1:-1] - v[:-2, 1:-1]) / (2 * dx)  # (Nx-2, Ny-1)
-        # dvdy at v interior
-        dvdy = (v[1:-1, 2:] - v[1:-1, :-2]) / (2 * dy)  # (Nx-2, Ny-1)
-        
-        # Interpolate u to v-faces from the four surrounding u-face values.
-        u_at_v = 0.25 * (
-            u[1:-2, :-1] + u[2:-1, :-1] +
-            u[1:-2, 1:] + u[2:-1, 1:]
-        )
-        
-        v_adv = v[1:-1, 1:-1]  # (Nx-2, Ny-1)
-        advection_v = u_at_v * dvdx + v_adv * dvdy
+        # Apply initial BCs
+        self.bc.apply(self.u, self.v, Nx, Ny)
 
-        return advection_u, advection_v
+    @property
+    def Nx(self):
+        return self.mesh.Nx
 
-    def _laplacian(self, u, dx, dy):
-        """Compute Laplacian using central differences with boundary conditions."""
-        lap = np.zeros_like(u)
-        
-        # Interior points: standard 5-point stencil
-        lap[1:-1, 1:-1] = (
-            (u[2:, 1:-1] - 2*u[1:-1, 1:-1] + u[:-2, 1:-1]) / dx**2 +
-            (u[1:-1, 2:] - 2*u[1:-1, 1:-1] + u[1:-1, :-2]) / dy**2
-        )
-        return lap
+    @property
+    def Ny(self):
+        return self.mesh.Ny
+
+    @property
+    def dx(self):
+        return self.mesh.dx
+
+    @property
+    def dy(self):
+        return self.mesh.dy
+
+    @property
+    def Lx(self):
+        return self.mesh.Lx
+
+    @property
+    def Ly(self):
+        return self.mesh.Ly
 
     def step(self):
         """Advance one time step."""
-        u, v = self.u, self.v
-        dx, dy, dt = self.grid.dx, self.grid.dy, self.dt
-        nu = self.nu
+        Nx, Ny = self.Nx, self.Ny
+        dx, dy = self.mesh.dx, self.mesh.dy
+        dt = self.dt
 
-        # --- Predictor: momentum without pressure ---
-        u_star = u.copy()
-        v_star = v.copy()
+        self.bc.apply(self.u, self.v, Nx, Ny)
 
-        # Advection
-        d_u, d_v = self._advection(u, v, dx, dy)
+        adv_u, adv_v = self._advection_fn(self.u, self.v, dx, dy)
 
-        # Laplacian
-        lap_u = self._laplacian(u, dx, dy)
-        lap_v = self._laplacian(v, dx, dy)
+        if self._diffusion is not None:
+            u_star, v_star = self._diffusion.solve(self.u, self.v, adv_u, adv_v)
+        else:
+            from .diffusion import explicit
+            u_star, v_star = explicit(
+                self.u, self.v, adv_u, adv_v, dx, dy, dt,
+                self.nu, self.bc, Nx, Ny,
+            )
 
-        # Interior update for u (at faces i+1/2, j)
-        u_star[1:-1, 1:-1] = u[1:-1, 1:-1] + dt * (
-            -d_u + nu * lap_u[1:-1, 1:-1]
-        )
-        # Interior update for v (at faces i, j+1/2)
-        v_star[1:-1, 1:-1] = v[1:-1, 1:-1] + dt * (
-            -d_v + nu * lap_v[1:-1, 1:-1]
-        )
-        
-        # Apply boundary conditions to predictor velocities for consistent advection in next iteration
-        # This ensures boundary conditions are enforced at the same time level for the divergence calculation
-        self.bc.apply(u_star, v_star)
+        self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
-        # --- Poisson: pressure correction ---
-        div = (
-            (u_star[1:, :] - u_star[:-1, :]) / dx +
-            (v_star[:, 1:] - v_star[:, :-1]) / dy
-        )
-
-        # Pressure Poisson equation: nabla^2 p = div / dt.
-        # Pure Neumann pressure BCs need a compatible zero-mean RHS.
-        rhs = div / dt
-        rhs -= np.mean(rhs)
-        
-        rhs_flat = (-rhs).ravel()
-        rhs_flat[0] = 0.0
-        p_flat, info = cg(self.pressure_matrix, rhs_flat, x0=self.p.ravel())
-        if info != 0:
-            raise RuntimeError(f"Pressure solve failed to converge (info={info})")
-        self.p = p_flat.reshape(self.grid.shape_p)
-        self.p -= np.mean(self.p)
-
-        # --- Corrector: apply pressure gradient ---
-        # Pressure gradient at face locations
-        # dp/dx at u-faces: p[i+1,j] - p[i,j], shape (Nx-1, Ny)
         grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx
-        # dp/dy at v-faces: p[i,j+1] - p[i,j], shape (Nx, Ny-1)
         grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy
 
-        # Update interior u and v
-        u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x[:, 1:-1]
-        v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y[1:-1, :]
+        self.u[1:-1, :] = u_star[1:-1, :] - dt * grad_p_x
+        self.v[:, 1:-1] = v_star[:, 1:-1] - dt * grad_p_y
 
-        # Re-apply boundaries
-        self.bc.apply(u, v)
+        self.bc.apply(self.u, self.v, Nx, Ny)
 
-    def solve(self, steps: int, verbose: bool = True):
-        """Run the simulation."""
+    def solve(self, steps, verbose=True):
+        """Run the simulation for the given number of steps."""
         for i in range(steps):
             self.step()
-            if verbose and i % max(1, steps // 10) == 0:
-                div = self.divergence(interior_only=True)
-                print(f"Step {i}: max |∇·u| = {div:.6e}")
 
-    def divergence(self, interior_only: bool = False):
-        """Check mass conservation. Should be ~0."""
-        dx, dy = self.grid.dx, self.grid.dy
-        # Divergence at cell centers: du/dx + dv/dy
-        # u is at x-faces: shape (Nx+1, Ny), so du/dx uses u[i+1,j] - u[i,j] / dx
-        # v is at y-faces: shape (Nx, Ny+1), so dv/dy uses v[i,j+1] - v[i,j] / dy
-        div = (
-            (self.u[1:, :] - self.u[:-1, :]) / dx +  # du/dx at cell centers
-            (self.v[:, 1:] - self.v[:, :-1]) / dy    # dv/dy at cell centers
-        )
-        if interior_only and div.shape[0] > 2 and div.shape[1] > 2:
-            div = div[1:-1, 1:-1]
-        return np.max(np.abs(div))
+            if is_blowup(self.u, self.v):
+                if verbose:
+                    print(
+                        f"Step {i:4d}: BLOWUP — velocity is NaN/Inf.\n"
+                        f"  Try: smaller dt, smaller lid_speed, or smooth_lid=True."
+                    )
+                return
+
+            if verbose and i % max(1, steps // 10) == 0:
+                print(
+                    f"Step {i:4d}: "
+                    f"|div|_inf = {max_divergence(self.u, self.v, self.dx, self.dy):.2e}, "
+                    f"CFL = {cfl(self.u, self.v, self.dx, self.dy, self.dt):.3f}"
+                )
+
+    def divergence_norm(self):
+        """RMS divergence."""
+        return divergence_norm(self.u, self.v, self.dx, self.dy)
+
+    def max_divergence(self, interior_only=False):
+        """Max absolute divergence."""
+        return max_divergence(self.u, self.v, self.dx, self.dy, interior_only)
+
+    def cfl(self):
+        """Maximum CFL number."""
+        return cfl(self.u, self.v, self.dx, self.dy, self.dt)
+
+    def save(self, path, skip=None, scale=None):
+        """Save pressure contour + velocity magnitude plot."""
+        save_contour(self.mesh, self.u, self.v, self.p, path, skip, scale)
+
+    def save_quiver(self, path, skip=None, scale=None):
+        """Save velocity vector plot."""
+        _save_quiver(self.mesh, self.u, self.v, path, skip, scale)

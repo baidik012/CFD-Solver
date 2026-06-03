@@ -8,39 +8,42 @@ Notes on how the solver works and how to extend it.
 CFD-Solver/
 ├── src/cfd_solver/
 │   ├── solver/
-│   │   ├── grid.py             # Staggered C-grid (u/v at faces, p at centers)
-│   │   ├── solver.py           # Original colocated solver (for learning)
-│   │   ├── staggered_solver.py # Production solver (accurate, efficient)
-│   │   ├── boundaries.py       # Boundary conditions (used by Solver only)
-│   │   └── viz.py              # Plotting utilities
+│   │   ├── mesh.py             # Staggered grid generation
+│   │   ├── bc.py               # Boundary conditions & smooth profiles
+│   │   ├── advection.py        # Pluggable advection schemes
+│   │   ├── diffusion.py        # Explicit Euler & Crank-Nicolson
+│   │   ├── pressure.py         # Poisson solver (CG + sparse matrix)
+│   │   ├── diagnostics.py      # CFL, divergence, blowup detection
+│   │   ├── projection.py       # Chorin step orchestration
+│   │   ├── solver.py           # Public API (Solver class)
+│   │   └── viz.py              # Visualization (quiver + contour)
 │   └── cli/
 │       └── __init__.py         # CLI entry point
-├── examples/                   # Example scripts and configs
-├── output/                     # Solver output images
-├── tests/                      # Unit tests
-├── run_interactive.py          # Interactive parameter prompts + solver launch
-├── setup.bat / setup.sh        # One-click environment setup
-├── run.bat / run.sh            # One-click solver launcher
-├── pyproject.toml              # Package config
-└── requirements.txt            # Dependencies
+├── examples/                    # Example scripts and configs
+├── output/                      # Solver output images
+├── tests/                       # Unit tests (25 tests)
+├── run_interactive.py           # Interactive parameter prompts
+├── setup.bat / setup.sh         # One-click environment setup
+├── run.bat / run.sh             # One-click solver launcher
+├── pyproject.toml               # Package config
+└── requirements.txt             # Dependencies
 ```
 
-## Two Solvers
+## Architecture
 
-**Original (`Solver`)** — Good for learning, simpler code:
-- Collocated grid (all variables at cell centers)
-- Forward Euler time integration
-- Upwind advection (1st order)
-- Jacobi pressure solver
+The solver is split into focused modules with clear responsibilities:
 
-**Staggered (`StaggeredSolver`)** — For research and accuracy:
-- Arakawa C-grid (prevents odd-even decoupling)
-- Adams-Bashforth time integration (2nd order)
-- QUICK advection (3rd order)
-- Crank-Nicolson semi-implicit diffusion (unconditionally stable)
-- Conjugate gradient + sparse matrix for pressure
-
-Use the staggered solver for actual projects.
+| Module | Responsibility |
+|--------|---------------|
+| `mesh.py` | Grid generation, coordinate arrays, spacing |
+| `bc.py` | Boundary conditions, smooth lid profiles |
+| `advection.py` | Upwind (1st order) & central (2nd order) schemes |
+| `diffusion.py` | Explicit Euler & Crank-Nicolson semi-implicit |
+| `pressure.py` | Poisson matrix assembly + CG solve |
+| `diagnostics.py` | CFL, divergence norms, blowup detection |
+| `projection.py` | Chorin step orchestration |
+| `solver.py` | Thin public API that wires everything together |
+| `viz.py` | Unified visualization (quiver + contour) |
 
 ## Core Concepts
 
@@ -77,49 +80,51 @@ This arrangement avoids the "checkerboard" pressure instability that plagues col
    u^{n+1} = u* - dt*∇p
    ```
 
-### Time Integration
-
-Adams-Bashforth (AB2) for the advection term:
-```
-u^{n+1} = u^n + dt*(1.5*f^n - 0.5*f^{n-1})
-```
-This is 2nd order accurate and has better stability than forward Euler.
-
 ### Boundary Conditions
 
-The staggered solver accepts arbitrary BCs via dictionaries:
 ```python
-solver = StaggeredSolver(
-    ..., u_bc={"top": 1.0, "bottom": 0.0, "left": 0.0, "right": 0.0},
-            v_bc={"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0})
+from cfd_solver.solver import Solver
+
+# Constant lid
+s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0)
+
+# Smooth sinusoidal lid (removes corner singularity)
+s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0, smooth_lid=True)
 ```
 
-`_set_bc(u, v)` applies the BCs to any velocity array. `_apply_bc()` is a convenience wrapper for `self.u` / `self.v`.
+The smooth lid applies `u(x) = U * sin(πx/L)` on the top wall — zero at corners, maximum in the center. This removes the velocity discontinuity that causes instabilities at fine grids.
 
-Currently implemented:
-- **No-slip walls**: velocity = 0 (default for all sides)
-- **Moving lid**: specify `u_bc={"top": U}` for lid-driven cavity
-- **Arbitrary values**: set any side to any constant
+### Pluggable Advection Schemes
 
-Not yet implemented:
-- **Periodic**: left flows into right
-- **Inlet/outlet**: specify velocity or pressure at open boundaries
+```python
+from cfd_solver.solver import Solver
 
-## Adding a New Test Case
+# First-order upwind (diffusive but stable)
+s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, advection_scheme="upwind")
 
-1. Create a file in `examples/` — copy `staggered_cavity.py` as a template
-2. Instantiate the solver:
+# Second-order central (less diffusive, may oscillate)
+s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, advection_scheme="central")
+```
+
+## Adding a New Advection Scheme
+
+1. Add a function in `src/cfd_solver/solver/advection.py`:
    ```python
-   from cfd_solver.solver.staggered_solver import StaggeredSolver
-   from cfd_solver.solver.viz import save_velocity_contour
-
-   s = StaggeredSolver(Lx=1.0, Ly=1.0, Nx=128, Ny=128,
-                        nu=0.01, dt=0.001,
-                        u_bc={"top": 1.0})
-   s.solve(steps=1000, verbose=True)
-   save_velocity_contour(s, "output/my_result.png")
+   def my_scheme(u, v, dx, dy):
+       """My custom advection scheme."""
+       adv_u = np.zeros_like(u)
+       adv_v = np.zeros_like(v)
+       # ... compute advection at interior faces ...
+       return adv_u, adv_v
    ```
-3. Check divergence: `s.max_divergence()` (should be < 1e-6)
+
+2. Register it in `src/cfd_solver/solver/solver.py`:
+   ```python
+   if advection_scheme == "my_scheme":
+       self._advection_fn = advection.my_scheme
+   ```
+
+3. Add a test in `tests/test_core.py`.
 
 ## Verifying Your Results
 
@@ -154,7 +159,7 @@ v_center at y=0.5 should match published results
 | 64×64 | ~0.001 for 100+ steps | Advection limits long runs |
 | 128×128 | ~0.001 for ~30 steps | Advection instability earlier |
 
-To improve stability at high resolution: reduce dt, increase nu, or use a higher-order advection scheme.
+Use `smooth_lid=True` (default) to push these limits further.
 
 ## Physics Conventions
 
@@ -189,9 +194,8 @@ If results look wrong:
 - 32x32 is good for quick tests (< 1 second)
 - 128x128 for standard runs (~1-2 seconds)
 - 256x256 for detailed runs (~5-10 seconds)
-- 512x512 for publication quality (~30-60 seconds)
 
-For large grids, the conjugate gradient solver converges in ~20-50 iterations instead of 50 full Jacobi passes — that's the main speedup over the original solver.
+For large grids, the conjugate gradient solver converges in ~20-50 iterations — that's the main speedup over a naive Jacobi approach.
 
 ## Running Tests
 
@@ -199,4 +203,4 @@ For large grids, the conjugate gradient solver converges in ~20-50 iterations in
 pytest tests/
 ```
 
-All 9 tests should pass. Tests cover grid construction, boundary conditions, time-stepping, divergence, CFL, and pressure symmetry.
+All 25 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, and the full Solver API.

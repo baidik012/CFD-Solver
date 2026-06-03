@@ -1,41 +1,57 @@
-"""Visualization utilities."""
+"""Visualization utilities for staggered incompressible flow.
+
+Provides two main functions:
+  - save_quiver: velocity vector plot
+  - save_contour: pressure + velocity magnitude side-by-side
+
+Both accept a Mesh and the velocity/pressure arrays directly.
+"""
 
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
-    """Save a quiver plot of the velocity field."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def _default_skip(Nx, Ny):
+    return max(1, min(Nx, Ny) // 32)
 
+
+def _interpolate_to_centers(u, v):
+    """Interpolate face velocities to cell centers."""
+    u_c = 0.5 * (u[1:, :] + u[:-1, :])
+    v_c = 0.5 * (v[:, 1:] + v[:, :-1])
+    return u_c, v_c
+
+
+def save_quiver(mesh, u, v, path, skip=None, scale=None):
+    """Save a quiver plot of the velocity field.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    u : ndarray, shape (Nx+1, Ny)
+    v : ndarray, shape (Nx, Ny+1)
+    path : str
+        Output file path.
+    skip : int, optional
+        Subsampling factor for quiver arrows.
+    scale : float, optional
+        Matplotlib quiver scale parameter.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if skip is None:
-        skip = max(1, min(grid.Nx, grid.Ny) // 32)
+        skip = _default_skip(mesh.Nx, mesh.Ny)
+
+    X, Y = mesh.cell_center_grid()
+    u_c, v_c = _interpolate_to_centers(u, v)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-
-    # Interpolate face velocities to cell centers for plotting
-    if u.shape == grid.shape_u and v.shape == grid.shape_v:
-        U_full = 0.5 * (u[1:, :] + u[:-1, :])  # shape (Nx, Ny)
-        V_full = 0.5 * (v[:, 1:] + v[:, :-1])
-    else:
-        U_full = u
-        V_full = v
-
-    # Cell-center coordinates (Nx, Ny) — transposed to match U/V shape
-    X = grid.X
-    Y = grid.Y
-
-    Xp = X[::skip, ::skip]
-    Yp = Y[::skip, ::skip]
-    U = U_full[::skip, ::skip]
-    V = V_full[::skip, ::skip]
-
-    q = ax.quiver(Xp, Yp, U, V, color='black', alpha=0.6, scale=scale)
-
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
-    ax.set_title("Velocity Field (quiver)")
+    ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
+              u_c[::skip, ::skip], v_c[::skip, ::skip],
+              color="black", alpha=0.6, scale=scale)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Velocity Field")
     ax.set_aspect("equal")
     plt.tight_layout()
     plt.savefig(path)
@@ -43,77 +59,50 @@ def save_velocity_plot(grid, u, v, path, skip=None, scale=None):
     print(f"Saved {path}")
 
 
-def _cell_center_plot_fields(solver):
-    """Return cell-centered fields in Matplotlib's (y, x) array order."""
-    Nx, Ny = solver.Nx, solver.Ny
+def save_contour(mesh, u, v, p, path, skip=None, scale=None):
+    """Save pressure contours and velocity magnitude side-by-side.
 
-    u_center = 0.5 * (solver.u[1:, :] + solver.u[:-1, :])
-    v_center = 0.5 * (solver.v[:, 1:] + solver.v[:, :-1])
-    speed = np.sqrt(u_center**2 + v_center**2)
-
-    x = np.linspace(solver.dx / 2, solver.Lx - solver.dx / 2, Nx)
-    y = np.linspace(solver.dy / 2, solver.Ly - solver.dy / 2, Ny)
-    X, Y = np.meshgrid(x, y)
-
-    return {
-        "X": X,
-        "Y": Y,
-        "pressure": solver.p.T,
-        "speed": speed.T,
-        "u": u_center.T,
-        "v": v_center.T,
-    }
-
-
-def save_velocity_contour(solver, path, skip=None, scale=None, cell_mask=None):
-    """Save pressure contours and velocity vectors for staggered solver.
-
-    Parameters:
-    - cell_mask: optional (Nx, Ny) bool array where True=fluid, False=solid
+    Parameters
+    ----------
+    mesh : Mesh
+    u : ndarray, shape (Nx+1, Ny)
+    v : ndarray, shape (Nx, Ny+1)
+    p : ndarray, shape (Nx, Ny)
+    path : str
+        Output file path.
+    skip : int, optional
+        Subsampling factor for quiver arrows.
+    scale : float, optional
+        Matplotlib quiver scale parameter.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if skip is None:
+        skip = _default_skip(mesh.Nx, mesh.Ny)
 
-    fields = _cell_center_plot_fields(solver)
-    X = fields["X"]
-    Y = fields["Y"]
-    pressure = fields["pressure"]
-    speed = fields["speed"]
-    u_center = fields["u"]
-    v_center = fields["v"]
+    X, Y = mesh.cell_center_grid()
+    u_c, v_c = _interpolate_to_centers(u, v)
+    speed = np.sqrt(u_c**2 + v_c**2)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # Prepare mask overlay once if needed
-    if cell_mask is not None:
-        solid_mask = (~cell_mask).astype(float).T
-        mask_kw = dict(levels=[0.5, 1.5], colors=['lightgray'], alpha=0.5)
+    # Pressure
+    cf = axes[0].contourf(X, Y, p, levels=100, cmap="RdBu_r")
+    axes[0].set_xlabel("x")
+    axes[0].set_ylabel("y")
+    axes[0].set_title("Pressure")
+    axes[0].set_aspect("equal")
+    plt.colorbar(cf, ax=axes[0], label="p")
 
-    # Pressure contours
-    ax = axes[0]
-    cf = ax.contourf(X, Y, pressure, levels=100, cmap='RdBu_r')
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
-    ax.set_title("Pressure Field")
-    ax.set_aspect("equal")
-    plt.colorbar(cf, ax=ax, label="p")
-    if cell_mask is not None:
-        ax.contourf(X, Y, solid_mask, **mask_kw)
-
-    # Velocity field
-    ax = axes[1]
-    cf = ax.contourf(X, Y, speed, levels=100, cmap='viridis')
-    if skip is None:
-        skip = max(1, min(solver.Nx, solver.Ny) // 32)
-    ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
-              u_center[::skip, ::skip], v_center[::skip, ::skip],
-              color='white', alpha=0.7, scale=scale)
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
-    ax.set_title("Velocity Magnitude")
-    ax.set_aspect("equal")
-    plt.colorbar(cf, ax=ax, label="|u|")
-    if cell_mask is not None:
-        ax.contourf(X, Y, solid_mask, **mask_kw)
+    # Velocity magnitude
+    cf = axes[1].contourf(X, Y, speed, levels=100, cmap="viridis")
+    axes[1].quiver(X[::skip, ::skip], Y[::skip, ::skip],
+                   u_c[::skip, ::skip], v_c[::skip, ::skip],
+                   color="white", alpha=0.7, scale=scale)
+    axes[1].set_xlabel("x")
+    axes[1].set_ylabel("y")
+    axes[1].set_title("Velocity Magnitude")
+    axes[1].set_aspect("equal")
+    plt.colorbar(cf, ax=axes[1], label="|u|")
 
     plt.tight_layout()
     plt.savefig(path)

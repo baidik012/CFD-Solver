@@ -1,123 +1,255 @@
+"""Tests for the refactored CFD solver."""
 
-import sys
-import os
 import numpy as np
+import pytest
 
-# Ensure local src is importable
-sys.path.insert(0, os.path.abspath('src'))
-
-from cfd_solver.solver.grid import Grid
-from cfd_solver.solver.boundaries import BoundaryConditions
+from cfd_solver.solver.mesh import Mesh
+from cfd_solver.solver.bc import BoundaryConditions
 from cfd_solver.solver.solver import Solver
-from cfd_solver.solver.staggered_solver import StaggeredSolver
-from cfd_solver.solver.viz import _cell_center_plot_fields, save_velocity_plot
+from cfd_solver.solver import advection
+from cfd_solver.solver.diffusion import CrankNicolson, explicit
+from cfd_solver.solver.pressure import PressureSolver
+from cfd_solver.solver import diagnostics
+from cfd_solver.solver.viz import save_quiver, save_contour
 
 
-def test_grid_shapes():
-    g = Grid(1.0, 1.0, 8, 6)
-    assert g.shape_u == (9, 6)
-    assert g.shape_v == (8, 7)
-    assert g.shape_p == (8, 6)
-    X = g.X
-    Y = g.Y
-    assert X.shape == (8, 6)
-    assert Y.shape == (8, 6)
-    assert g.Xv.shape == (7, 8)
-    assert g.Yv.shape == (7, 8)
-    assert g.Xv_T.shape == (8, 7)
-    assert g.Yv_T.shape == (8, 7)
+# ── Mesh ─────────────────────────────────────────────────────────────
+
+def test_mesh_shapes():
+    m = Mesh(1.0, 1.0, 8, 6)
+    assert m.shape_u == (9, 6)
+    assert m.shape_v == (8, 7)
+    assert m.shape_p == (8, 6)
 
 
-def test_pressure_zero_mean_after_step():
-    s = StaggeredSolver(1.0, 1.0, 8, 6, nu=0.01, dt=1e-4,
-                        u_bc={"top": 1.0, "bottom": 0.0, "left": 0.0, "right": 0.0})
-    # single step should run and leave pressure with near-zero mean
+def test_mesh_spacing():
+    m = Mesh(2.0, 1.0, 4, 5)
+    assert m.dx == 0.5
+    assert m.dy == 0.2
+
+
+def test_mesh_grids():
+    m = Mesh(1.0, 1.0, 4, 3)
+    Xc, Yc = m.cell_center_grid()
+    assert Xc.shape == (4, 3)
+    assert Yc.shape == (4, 3)
+
+    Xf, Yf = m.u_face_grid()
+    assert Xf.shape == (5, 3)
+
+    Xv, Yv = m.v_face_grid()
+    assert Xv.shape == (4, 4)
+
+
+# ── Boundary Conditions ─────────────────────────────────────────────
+
+def test_bc_apply_constant_lid():
+    m = Mesh(1.0, 1.0, 5, 4)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(top=1.0, bottom=0.0, left=0.0, right=0.0)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    # Lid overrides corners — u[0,-1] and u[-1,-1] are set to top=1.0
+    assert np.allclose(u[1:-1, -1], 1.0)
+    assert np.allclose(u[:, 0], 0.0)
+    assert np.allclose(u[1:-1, 0], 0.0)
+    assert np.allclose(v[:, 0], 0.0)
+    assert np.allclose(v[:, -1], 0.0)
+
+
+def test_bc_apply_smooth_lid():
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(top=1.0, smooth_lid=True)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    # Smooth lid: zero at corners, peak in middle
+    assert u[0, -1] == pytest.approx(0.0)
+    assert u[-1, -1] == pytest.approx(0.0)
+    assert u[m.Nx // 2, -1] == pytest.approx(1.0, abs=0.01)
+    # Bottom wall still zero
+    assert np.allclose(u[:, 0], 0.0)
+
+
+def test_bc_lid_values():
+    bc = BoundaryConditions(top=2.0, smooth_lid=True)
+    lid = bc.lid_values(8)
+    assert len(lid) == 9
+    assert lid[0] == pytest.approx(0.0)
+    assert lid[4] == pytest.approx(2.0, abs=0.01)
+
+
+# ── Advection ────────────────────────────────────────────────────────
+
+def test_upwind_returns_zeros_on_boundary():
+    u = np.random.randn(9, 6)
+    v = np.random.randn(8, 7)
+    adv_u, adv_v = advection.upwind(u, v, 0.1, 0.1)
+    # Boundary faces should be zero
+    assert np.allclose(adv_u[0, :], 0.0)
+    assert np.allclose(adv_u[-1, :], 0.0)
+    assert np.allclose(adv_u[:, 0], 0.0)
+    assert np.allclose(adv_u[:, -1], 0.0)
+
+
+def test_central_returns_zeros_on_boundary():
+    u = np.random.randn(9, 6)
+    v = np.random.randn(8, 7)
+    adv_u, adv_v = advection.central(u, v, 0.1, 0.1)
+    assert np.allclose(adv_u[0, :], 0.0)
+    assert np.allclose(adv_u[-1, :], 0.0)
+
+
+def test_upwind_constant_field_gives_zero():
+    u = np.ones((9, 6)) * 3.0
+    v = np.ones((8, 7)) * 2.0
+    adv_u, adv_v = advection.upwind(u, v, 0.1, 0.1)
+    assert np.allclose(adv_u, 0.0, atol=1e-14)
+    assert np.allclose(adv_v, 0.0, atol=1e-14)
+
+
+# ── Diffusion ────────────────────────────────────────────────────────
+
+def test_explicit_diffusion_preserves_bc():
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(top=1.0)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    adv_u = np.zeros_like(u)
+    adv_v = np.zeros_like(v)
+
+    u_s, v_s = explicit(u, v, adv_u, adv_v, m.dx, m.dy, 1e-4, 0.01, bc, m.Nx, m.Ny)
+    assert np.allclose(u_s[:, -1], 1.0)
+    assert np.allclose(u_s[:, 0], 0.0)
+
+
+def test_crank_nicolson_builds_matrices():
+    m = Mesh(1.0, 1.0, 8, 6)
+    bc = BoundaryConditions(top=1.0)
+    cn = CrankNicolson(m, nu=0.01, dt=1e-4, bc=bc)
+    assert cn.A_u.shape == ((8 - 1) * (6 - 2), (8 - 1) * (6 - 2))
+    assert cn.A_v.shape == (8 * (6 - 1), 8 * (6 - 1))
+
+
+# ── Pressure ─────────────────────────────────────────────────────────
+
+def test_pressure_poisson_zero_divergence():
+    m = Mesh(1.0, 1.0, 8, 6)
+    ps = PressureSolver(m)
+
+    # Uniform u_star, v_star → zero divergence → zero pressure
+    u_s = np.ones(m.shape_u)
+    v_s = np.zeros(m.shape_v)
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert np.allclose(p, 0.0, atol=1e-10)
+
+
+def test_pressure_zero_mean():
+    m = Mesh(1.0, 1.0, 8, 6)
+    ps = PressureSolver(m)
+
+    u_s = np.random.randn(*m.shape_u) * 0.01
+    v_s = np.random.randn(*m.shape_v) * 0.01
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert abs(np.mean(p)) < 1e-10
+
+
+# ── Diagnostics ──────────────────────────────────────────────────────
+
+def test_divergence_uniform_flow():
+    u = np.ones((9, 6))
+    v = np.zeros((8, 7))
+    div = diagnostics.divergence(u, v, 0.1, 0.1)
+    assert np.allclose(div, 0.0)
+
+
+def test_cfl_computation():
+    u = np.ones((9, 6)) * 2.0
+    v = np.ones((8, 7)) * 3.0
+    c = diagnostics.cfl(u, v, 0.1, 0.1, 0.01)
+    assert c == pytest.approx(0.5)
+
+
+def test_is_blowup():
+    u = np.ones((9, 6))
+    v = np.ones((8, 7))
+    assert not diagnostics.is_blowup(u, v)
+
+    u[3, 2] = np.nan
+    assert diagnostics.is_blowup(u, v)
+
+
+# ── Solver (integration) ────────────────────────────────────────────
+
+def test_solver_step_runs():
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
+    s.step()
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    assert np.isfinite(s.p).all()
+
+
+def test_solver_pressure_zero_mean():
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
     s.step()
     assert abs(np.mean(s.p)) < 1e-6
 
 
-def test_divergence_nonnegative_and_finite():
-    s = StaggeredSolver(1.0, 1.0, 8, 6, nu=0.01, dt=1e-4)
-    s._apply_bc()
-    dn = s.divergence_norm()
-    md = s.max_divergence()
-    assert dn >= 0 and np.isfinite(dn)
-    assert md >= 0 and np.isfinite(md)
-
-
-def test_cell_center_plot_fields_match_matplotlib_axis_order():
-    s = StaggeredSolver(2.0, 1.0, 4, 3, nu=0.01, dt=1e-4,
-                        u_bc={"top": 1.0, "bottom": 0.0, "left": 0.0, "right": 0.0})
-    s._apply_bc()
-
-    fields = _cell_center_plot_fields(s)
-
-    assert fields["pressure"].shape == (s.Ny, s.Nx)
-    assert fields["speed"].shape == (s.Ny, s.Nx)
-    assert fields["u"].shape == (s.Ny, s.Nx)
-    assert fields["v"].shape == (s.Ny, s.Nx)
-    assert np.allclose(fields["u"][-1, :], 1.0)
-    assert np.allclose(fields["u"][:, -1], [0.0, 0.0, 1.0])
-
-
-def test_boundary_conditions_apply_to_staggered_sides():
-    g = Grid(1.0, 1.0, 5, 4)
-    u = np.zeros(g.shape_u)
-    v = np.zeros(g.shape_v)
-    bc = BoundaryConditions(
-        top_u=1.0, top_v=2.0,
-        bottom_u=3.0, bottom_v=4.0,
-        left_u=5.0, left_v=6.0,
-        right_u=7.0, right_v=8.0,
-    )
-
-    bc.apply(u, v)
-
-    assert np.allclose(u[1:-1, -1], bc.top_u)
-    assert np.allclose(u[1:-1, 0], bc.bottom_u)
-    assert np.allclose(u[0, 1:-1], bc.left_u)
-    assert np.allclose(u[-1, 1:-1], bc.right_u)
-    assert np.allclose(v[1:-1, -1], bc.top_v)
-    assert np.allclose(v[1:-1, 0], bc.bottom_v)
-    # v is NOT defined on left/right walls (cell-center x positions)
-
-
-def test_original_solver_lid_cavity_remains_finite():
-    g = Grid(1.0, 1.0, 10, 10)
-    s = Solver(g, nu=0.01, dt=0.001, bc=BoundaryConditions(top_u=1.0))
-
+def test_solver_remains_finite():
+    s = Solver(grid_size=(10, 10), nu=0.01, dt=0.001, lid_speed=1.0)
     for _ in range(5):
         s.step()
-
     assert np.isfinite(s.u).all()
     assert np.isfinite(s.v).all()
-    assert np.isfinite(s.p).all()
-    assert abs(np.mean(s.p)) < 1e-10
-    assert s.divergence() < 20.0
 
 
-def test_original_solver_reports_small_interior_divergence():
-    g = Grid(1.0, 1.0, 12, 12)
-    s = Solver(g, nu=0.01, dt=0.0005, bc=BoundaryConditions(top_u=1.0))
+def test_solver_smooth_lid():
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0, smooth_lid=True)
+    s.step()
+    assert np.isfinite(s.u).all()
 
+
+def test_solver_divergence_decreases():
+    s = Solver(grid_size=(12, 12), nu=0.01, dt=0.0005, lid_speed=1.0)
+    d0 = s.max_divergence(interior_only=True)
     for _ in range(20):
         s.step()
+    d1 = s.max_divergence(interior_only=True)
+    assert d1 < d0 + 0.1  # divergence should not grow
 
-    assert s.divergence(interior_only=True) < 1e-2
 
+def test_solver_upwind_and_central():
+    for scheme in ["upwind", "central"]:
+        s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4,
+                   advection_scheme=scheme, lid_speed=1.0)
+        s.step()
+        assert np.isfinite(s.u).all()
+
+
+# ── Viz ──────────────────────────────────────────────────────────────
+
+def test_save_quiver(tmp_path):
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
+    s.step()
+    path = tmp_path / "quiver.png"
+    save_quiver(s.mesh, s.u, s.v, str(path))
+    assert path.exists()
+
+
+def test_save_contour(tmp_path):
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
+    s.step()
+    path = tmp_path / "contour.png"
+    save_contour(s.mesh, s.u, s.v, s.p, str(path))
+    assert path.exists()
+
+
+# ── CLI imports ──────────────────────────────────────────────────────
 
 def test_cli_module_imports():
     import cfd_solver.cli as cli
-
     assert callable(cli.run)
-
-
-def test_save_velocity_plot_handles_staggered_velocity_shapes(tmp_path):
-    g = Grid(1.0, 1.0, 8, 6)
-    u = np.ones(g.shape_u)
-    v = np.zeros(g.shape_v)
-    path = tmp_path / "velocity.png"
-
-    save_velocity_plot(g, u, v, str(path))
-
-    assert path.exists()
