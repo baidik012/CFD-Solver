@@ -74,6 +74,8 @@ class Solver:
         self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
         self.dt = dt
         self.nu = nu
+        self.advection_scheme = advection_scheme
+        self.diffusion_scheme = diffusion_scheme
 
         # Velocity and pressure arrays
         self.u = np.zeros(self.mesh.shape_u)
@@ -222,8 +224,11 @@ class Solver:
             u=self.u, v=self.v, p=self.p,
             Nx=self.Nx, Ny=self.Ny,
             Lx=self.Lx, Ly=self.Ly,
-            dx=self.dx, dy=self.dy,
             dt=self.dt, nu=self.nu,
+            lid_speed=self.bc.top,  # Save lid_speed explicitly
+            smooth_lid=self.bc.smooth_lid,
+            advection_scheme=self.advection_scheme,
+            diffusion_scheme=self.diffusion_scheme,
         )
 
     @classmethod
@@ -237,8 +242,14 @@ class Solver:
         Nx, Ny = int(data["Nx"]), int(data["Ny"])
         Lx, Ly = float(data["Lx"]), float(data["Ly"])
         dt, nu = float(data["dt"]), float(data["nu"])
+        lid_speed = float(data["lid_speed"]) if "lid_speed" in data else 1.0
+        smooth_lid = bool(data["smooth_lid"]) if "smooth_lid" in data else True
+        advection_scheme = str(data["advection_scheme"]) if "advection_scheme" in data else "upwind"
+        diffusion_scheme = str(data["diffusion_scheme"]) if "diffusion_scheme" in data else "crank_nicolson"
 
-        solver = cls(grid_size=(Nx, Ny), nu=nu, dt=dt, Lx=Lx, Ly=Ly)
+        solver = cls(grid_size=(Nx, Ny), nu=nu, dt=dt, Lx=Lx, Ly=Ly,
+                     lid_speed=lid_speed, smooth_lid=smooth_lid,
+                     advection_scheme=advection_scheme, diffusion_scheme=diffusion_scheme)
         solver.u[:] = data["u"]
         solver.v[:] = data["v"]
         solver.p[:] = data["p"]

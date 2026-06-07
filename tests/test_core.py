@@ -233,6 +233,16 @@ def test_solver_upwind_and_central():
         assert np.isfinite(s.u).all()
 
 
+def test_full_grid_divergence_matches_interior():
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.0005, lid_speed=1.0)
+    for _ in range(50):
+        s.step()
+    interior = s.max_divergence(interior_only=True)
+    full = s.max_divergence(interior_only=False)
+    assert full < 1e-4  # should now match interior
+    assert abs(full - interior) < 1e-4
+
+
 # ── Viz ──────────────────────────────────────────────────────────────
 
 def test_save_quiver(tmp_path):
