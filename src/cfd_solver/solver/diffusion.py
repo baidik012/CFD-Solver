@@ -122,11 +122,11 @@ class CrankNicolson:
         rx = 0.5 * self.nu * self.dt / dx2
         ry = 0.5 * self.nu * self.dt / dy2
 
-        # i-direction: Nx unknowns, reflecting BCs at i=0 and i=Nx-1
+        # i-direction: Nx unknowns, no-slip (anti-symmetric) BCs at i=0 and i=Nx-1
         n_i = Nx
         diag_i = np.full(n_i, 2.0 * rx)
-        diag_i[0] = rx   # reflecting BC: reduce by rx
-        diag_i[-1] = rx  # reflecting BC: reduce by rx
+        diag_i[0] = 3.0 * rx   # no-slip BC: increase by rx
+        diag_i[-1] = 3.0 * rx  # no-slip BC: increase by rx
         off_i = np.full(n_i - 1, -rx)
         Lx_1d = diags([off_i, diag_i, off_i], [-1, 0, 1],
                        shape=(n_i, n_i), format="csr")
