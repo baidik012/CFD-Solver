@@ -18,8 +18,10 @@ def _default_skip(Nx, Ny):
 
 def _interpolate_to_centers(u, v):
     """Interpolate face velocities to cell centers."""
-    u_c = 0.5 * (u[1:, :] + u[:-1, :])
-    v_c = 0.5 * (v[:, 1:] + v[:, :-1])
+    u_phys = u[:, 1:-1]
+    v_phys = v[1:-1, :]
+    u_c = 0.5 * (u_phys[1:, :] + u_phys[:-1, :])
+    v_c = 0.5 * (v_phys[:, 1:] + v_phys[:, :-1])
     return u_c, v_c
 
 
@@ -29,8 +31,8 @@ def save_quiver(mesh, u, v, path, skip=None, scale=None):
     Parameters
     ----------
     mesh : Mesh
-    u : ndarray, shape (Nx+1, Ny)
-    v : ndarray, shape (Nx, Ny+1)
+    u : ndarray, shape (Nx+1, Ny+2)
+    v : ndarray, shape (Nx+2, Ny+1)
     path : str
         Output file path.
     skip : int, optional
@@ -65,9 +67,9 @@ def save_contour(mesh, u, v, p, path, skip=None, scale=None):
     Parameters
     ----------
     mesh : Mesh
-    u : ndarray, shape (Nx+1, Ny)
-    v : ndarray, shape (Nx, Ny+1)
-    p : ndarray, shape (Nx, Ny)
+    u : ndarray, shape (Nx+1, Ny+2)
+    v : ndarray, shape (Nx+2, Ny+1)
+    p : ndarray, shape (Nx+2, Ny+2)
     path : str
         Output file path.
     skip : int, optional
@@ -86,7 +88,7 @@ def save_contour(mesh, u, v, p, path, skip=None, scale=None):
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Pressure
-    cf = axes[0].contourf(X, Y, p, levels=100, cmap="RdBu_r")
+    cf = axes[0].contourf(X, Y, p[1:-1, 1:-1], levels=100, cmap="RdBu_r")
     axes[0].set_xlabel("x")
     axes[0].set_ylabel("y")
     axes[0].set_title("Pressure")

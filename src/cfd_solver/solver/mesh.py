@@ -41,18 +41,18 @@ class Mesh:
 
     @property
     def shape_u(self):
-        """Shape of u-velocity array: (Nx+1, Ny)."""
-        return (self.Nx + 1, self.Ny)
+        """Shape of u-velocity array: (Nx+1, Ny+2) including ghost layers in y."""
+        return (self.Nx + 1, self.Ny + 2)
 
     @property
     def shape_v(self):
-        """Shape of v-velocity array: (Nx, Ny+1)."""
-        return (self.Nx, self.Ny + 1)
+        """Shape of v-velocity array: (Nx+2, Ny+1) including ghost layers in x."""
+        return (self.Nx + 2, self.Ny + 1)
 
     @property
     def shape_p(self):
-        """Shape of pressure array: (Nx, Ny)."""
-        return (self.Nx, self.Ny)
+        """Shape of pressure array: (Nx+2, Ny+2) including ghost layers in x and y."""
+        return (self.Nx + 2, self.Ny + 2)
 
     def cell_center_grid(self):
         """Return (X, Y) meshgrid at cell centers, shape (Nx, Ny)."""

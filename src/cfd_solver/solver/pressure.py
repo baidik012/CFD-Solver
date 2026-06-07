@@ -1,61 +1,76 @@
-"""Pressure Poisson solver for staggered incompressible flow.
+"""Pressure Poisson solver for staggered incompressible flow with ghost cells.
 
 Builds a positive-Laplacian operator with Neumann walls and a pinned
 reference pressure, then solves via conjugate gradient.
-
-The operator is applied as a matrix-free ``LinearOperator`` backed by a
-numba-JIT stencil kernel. This avoids the sparse-matrix build cost and
-removes the per-iteration Python wrapper overhead of scipy's
-``csr_matvec``, both of which dominated runtime for small grids.
 """
 
 import numpy as np
-from scipy.sparse.linalg import LinearOperator, cg
-
 import numba
 
 
 @numba.njit(cache=True)
-def _pressure_matvec_kernel(p_flat, out, Nx, Ny, inv_dx2, inv_dy2):
-    """Apply the pressure Poisson operator to ``p_flat`` (1D, length Nx*Ny).
+def _pressure_matvec_kernel(p_active_flat, out_active_flat, p_2d, Nx, Ny, inv_dx2, inv_dy2):
+    """Apply the pressure Poisson operator to active interior cells.
 
-    Layout: ``k = i * Ny + j``.
-
-    The operator is the Kronecker sum ``Lx (x) I_Ny + I_Nx (x) Ly`` where
-    ``Lx`` and ``Ly`` are the 1D positive-definite Neumann Laplacians
-    (diagonal halved at the ends). The stencil form is
-    ``(2*c - left - right) * inv_h2`` in the interior and
-    ``(c - neighbor) * inv_h2`` at the boundary. Cell ``(0, 0)`` is
-    pinned: its row is the unit vector, and its column is zeroed (so
-    the stencil at adjacent cells omits the ``(0, 0)`` term).
+    Uses pressure ghost cells inside p_2d (1D array of size (Nx+2)*(Ny+2)) 
+    to automatically enforce Neumann boundary conditions.
     """
+    stride = Ny + 2
+
+    # 1. Populate interior of p_2d from active flat array
     for i in range(Nx):
-        base_i = i * Ny
+        base_2d = (i + 1) * stride
+        base_active = i * Ny
         for j in range(Ny):
-            k = base_i + j
+            p_2d[base_2d + j + 1] = p_active_flat[base_active + j]
+
+    # 2. Enforce Neumann boundary conditions on p_2d ghost cells
+    # Left and right walls
+    for j in range(Ny + 2):
+        p_2d[0 * stride + j] = p_2d[1 * stride + j]
+        p_2d[(Nx + 1) * stride + j] = p_2d[Nx * stride + j]
+    # Bottom and top walls
+    for i in range(Nx + 2):
+        base_i = i * stride
+        p_2d[base_i + 0] = p_2d[base_i + 1]
+        p_2d[base_i + Ny + 1] = p_2d[base_i + Ny]
+
+    # 3. Pin the first physical cell (i=0, j=0, active index 0)
+    out_active_flat[0] = p_active_flat[0]
+
+    # 4. Apply uniform 5-point stencil for all other active cells
+    # Active index: k = i * Ny + j
+    for i in range(Nx):
+        i_2d = i + 1
+        base_2d = i_2d * stride
+        base_active = i * Ny
+        for j in range(Ny):
+            k = base_active + j
             if k == 0:
-                out[k] = p_flat[k]
                 continue
 
-            if i == 0:
-                ddx2 = (p_flat[k] - p_flat[k + Ny]) * inv_dx2
-            elif i == Nx - 1:
-                ddx2 = (p_flat[k] - p_flat[k - Ny]) * inv_dx2
-            elif k - Ny == 0:
-                ddx2 = (2.0 * p_flat[k] - p_flat[k + Ny]) * inv_dx2
-            else:
-                ddx2 = (2.0 * p_flat[k] - p_flat[k - Ny] - p_flat[k + Ny]) * inv_dx2
+            j_2d = j + 1
 
-            if j == 0:
-                ddy2 = (p_flat[k] - p_flat[k + 1]) * inv_dy2
-            elif j == Ny - 1:
-                ddy2 = (p_flat[k] - p_flat[k - 1]) * inv_dy2
-            elif k - 1 == 0:
-                ddy2 = (2.0 * p_flat[k] - p_flat[k + 1]) * inv_dy2
-            else:
-                ddy2 = (2.0 * p_flat[k] - p_flat[k - 1] - p_flat[k + 1]) * inv_dy2
+            left = p_2d[(i_2d - 1) * stride + j_2d]
+            right = p_2d[(i_2d + 1) * stride + j_2d]
+            bottom = p_2d[base_2d + j_2d - 1]
+            top = p_2d[base_2d + j_2d + 1]
+            center = p_2d[base_2d + j_2d]
 
-            out[k] = ddx2 + ddy2
+            # Column zeroing: omit connections to pinned cell (active index 0 at interior coordinates (1,1))
+            if i_2d - 1 == 1 and j_2d == 1:
+                left = 0.0
+            if i_2d + 1 == 1 and j_2d == 1:
+                right = 0.0
+            if i_2d == 1 and j_2d - 1 == 1:
+                bottom = 0.0
+            if i_2d == 1 and j_2d + 1 == 1:
+                top = 0.0
+
+            ddx2 = (2.0 * center - left - right) * inv_dx2
+            ddy2 = (2.0 * center - bottom - top) * inv_dy2
+
+            out_active_flat[k] = ddx2 + ddy2
 
 
 @numba.njit(cache=True)
@@ -67,11 +82,11 @@ def _norm2(v):
 
 
 @numba.njit(cache=True)
-def _cg_solve(x, b, Nx, Ny, inv_dx2, inv_dy2, maxiter, rtol):
+def _cg_solve(x, b, p_2d, Nx, Ny, inv_dx2, inv_dy2, maxiter, rtol):
     n = Nx * Ny
     r = np.empty(n, dtype=np.float64)
     # r = b - A x_0
-    _pressure_matvec_kernel(x, r, Nx, Ny, inv_dx2, inv_dy2)
+    _pressure_matvec_kernel(x, r, p_2d, Nx, Ny, inv_dx2, inv_dy2)
     for i in range(n):
         r[i] = b[i] - r[i]
 
@@ -90,7 +105,7 @@ def _cg_solve(x, b, Nx, Ny, inv_dx2, inv_dy2, maxiter, rtol):
     w = np.empty(n, dtype=np.float64)
 
     for k in range(maxiter):
-        _pressure_matvec_kernel(p, w, Nx, Ny, inv_dx2, inv_dy2)
+        _pressure_matvec_kernel(p, w, p_2d, Nx, Ny, inv_dx2, inv_dy2)
 
         p_dot_w = 0.0
         for i in range(n):
@@ -137,8 +152,11 @@ class PressureSolver:
         self.cg_maxiter = cg_maxiter
         self.cg_rtol = cg_rtol
 
+        # Preallocate work arrays to avoid JIT allocation overhead
+        self._work_2d = np.empty((self.Nx + 2) * (self.Ny + 2), dtype=np.float64)
+
     def solve(self, u_star, v_star, dt):
-        """Solve the pressure Poisson equation and return p (Nx, Ny).
+        """Solve the pressure Poisson equation and return p (Nx+2, Ny+2).
 
         Parameters
         ----------
@@ -150,7 +168,8 @@ class PressureSolver:
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.dx, self.dy
 
-        div = (u_star[1:, :] - u_star[:-1, :]) / dx + (v_star[:, 1:] - v_star[:, :-1]) / dy
+        # Compute divergence over active cells
+        div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
         rhs = (-div / dt).flatten()
         rhs[0] = 0.0
 
@@ -159,11 +178,22 @@ class PressureSolver:
         inv_dy2 = 1.0 / (dy * dy)
 
         info = _cg_solve(
-            p_flat, rhs, Nx, Ny, inv_dx2, inv_dy2, self.cg_maxiter, self.cg_rtol
+            p_flat, rhs, self._work_2d, Nx, Ny, inv_dx2, inv_dy2, self.cg_maxiter, self.cg_rtol
         )
         if info < 0 or info == self.cg_maxiter:
             raise RuntimeError(f"Pressure CG failed to converge (info={info})")
 
-        p = p_flat.reshape((Nx, Ny))
-        p -= np.mean(p)
+        p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
+        # Populate interior physical cells
+        for i in range(Nx):
+            p[i + 1, 1:-1] = p_flat[i * Ny : (i + 1) * Ny]
+
+        p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
+
+        # Enforce Neumann BCs on pressure ghost cells
+        p[0, :] = p[1, :]
+        p[-1, :] = p[-2, :]
+        p[:, 0] = p[:, 1]
+        p[:, -1] = p[:, -2]
+
         return p
