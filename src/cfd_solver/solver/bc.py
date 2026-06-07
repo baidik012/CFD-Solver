@@ -37,30 +37,44 @@ class BoundaryConditions:
         return self._lid_profile
 
     def apply(self, u, v, Nx: int, Ny: int):
-        """Set boundary values on u (Nx+1, Ny) and v (Nx, Ny+1).
+        """Set boundary values on u (Nx+1, Ny+2) and v (Nx+2, Ny+1).
 
-        u is defined on all walls. v is only defined on top/bottom walls
-        (j=0, j=Ny); it is not defined on left/right walls.
+        Physical boundaries:
+        - u-normal (left/right walls) is defined at u[0, 1:-1] and u[Nx, 1:-1].
+        - v-normal (bottom/top walls) is defined at v[1:-1, 0] and v[1:-1, Ny].
+        - u-tangential (bottom/top walls) is set via ghost cells u[:, 0] and u[:, -1].
+        - v-tangential (left/right walls) is set via ghost cells v[0, :] and v[-1, :].
         """
-        # u on all walls
-        u[0, :] = self.left
-        u[Nx, :] = self.right
-        u[:, 0] = self.bottom
+        # 1. Normal velocities (no penetration: zero at walls)
+        u[0, 1:-1] = 0.0
+        u[Nx, 1:-1] = 0.0
+        v[1:-1, 0] = 0.0
+        v[1:-1, Ny] = 0.0
 
+        # 2. Tangential velocity u at top/bottom walls (via ghost cells)
+        u[:, 0] = 2.0 * self.bottom - u[:, 1]
         if self.smooth_lid:
-            u[:, Ny - 1] = self._get_lid_profile(Nx)
+            u[:, -1] = 2.0 * self._get_lid_profile(Nx) - u[:, -2]
         else:
-            u[:, Ny - 1] = self.top
+            u[:, -1] = 2.0 * self.top - u[:, -2]
 
-        # v on top and bottom only
-        v[:, 0] = self.bottom
-        v[:, Ny] = 0.0
+        # 3. Tangential velocity v at left/right walls (via ghost cells)
+        v[0, :] = 2.0 * self.left - v[1, :]
+        v[-1, :] = 2.0 * self.right - v[-2, :]
+
+    def apply_pressure(self, p):
+        """Set pressure ghost cells using Neumann BC (zero gradient).
+
+        p shape is (Nx+2, Ny+2).
+        """
+        p[0, :] = p[1, :]    # left wall
+        p[-1, :] = p[-2, :]  # right wall
+        p[:, 0] = p[:, 1]    # bottom wall
+        p[:, -1] = p[:, -2]  # top wall
 
     def lid_values(self, Nx: int):
-        """Return the lid u-values at u-face positions (length Nx+1).
-
-        Used by the diffusion solver for Dirichlet boundary contributions.
-        """
+        """Return the lid u-values at u-face positions (length Nx+1)."""
         if self.smooth_lid:
             return self._get_lid_profile(Nx)
         return self.top
+

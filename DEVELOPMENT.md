@@ -199,8 +199,21 @@ For large grids, the conjugate gradient solver converges in ~20-50 iterations â€
 
 ## Running Tests
 
+First, activate the virtual environment:
 ```bash
-pytest tests/
+# Mac/Linux
+source venv/bin/activate
+
+# Windows (Command Prompt)
+venv\Scripts\activate
+
+# Windows (Git Bash)
+source venv/Scripts/activate
+```
+
+Then run:
+```bash
+pytest
 ```
 
 All 25 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, and the full Solver API.

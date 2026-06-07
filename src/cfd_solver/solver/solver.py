@@ -152,11 +152,11 @@ class Solver:
 
         self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
-        grad_p_x = (self.p[1:, :] - self.p[:-1, :]) / dx
-        grad_p_y = (self.p[:, 1:] - self.p[:, :-1]) / dy
+        grad_p_x = (self.p[2:-1, 1:-1] - self.p[1:-2, 1:-1]) / dx
+        grad_p_y = (self.p[1:-1, 2:-1] - self.p[1:-1, 1:-2]) / dy
 
-        self.u[1:-1, :] = u_star[1:-1, :] - dt * grad_p_x
-        self.v[:, 1:-1] = v_star[:, 1:-1] - dt * grad_p_y
+        self.u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x
+        self.v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y
 
         self.bc.apply(self.u, self.v, Nx, Ny)
 

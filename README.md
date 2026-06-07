@@ -122,8 +122,21 @@ No code editing or YAML files needed.
 
 ### Run tests
 
+First, activate the virtual environment:
 ```bash
-pytest tests/
+# Mac/Linux
+source venv/bin/activate
+
+# Windows (Command Prompt)
+venv\Scripts\activate
+
+# Windows (Git Bash)
+source venv/Scripts/activate
+```
+
+Then run:
+```bash
+pytest
 ```
 
 All commands run from the root directory.

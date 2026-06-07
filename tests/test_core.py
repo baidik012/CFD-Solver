@@ -1,4 +1,4 @@
-"""Tests for the refactored CFD solver."""
+"""Tests for the refactored CFD solver with ghost cells."""
 
 import numpy as np
 import pytest
@@ -17,9 +17,9 @@ from cfd_solver.solver.viz import save_quiver, save_contour
 
 def test_mesh_shapes():
     m = Mesh(1.0, 1.0, 8, 6)
-    assert m.shape_u == (9, 6)
-    assert m.shape_v == (8, 7)
-    assert m.shape_p == (8, 6)
+    assert m.shape_u == (9, 8)  # (Nx+1, Ny+2)
+    assert m.shape_v == (10, 7)  # (Nx+2, Ny+1)
+    assert m.shape_p == (10, 8)  # (Nx+2, Ny+2)
 
 
 def test_mesh_spacing():
@@ -50,12 +50,14 @@ def test_bc_apply_constant_lid():
     bc = BoundaryConditions(top=1.0, bottom=0.0, left=0.0, right=0.0)
     bc.apply(u, v, m.Nx, m.Ny)
 
-    # Lid overrides corners — u[0,-1] and u[-1,-1] are set to top=1.0
-    assert np.allclose(u[1:-1, -1], 1.0)
+    # Top ghost cell values should be 2.0 to reflect 1.0 boundary velocity
+    assert np.allclose(u[:, -1], 2.0)
     assert np.allclose(u[:, 0], 0.0)
-    assert np.allclose(u[1:-1, 0], 0.0)
-    assert np.allclose(v[:, 0], 0.0)
-    assert np.allclose(v[:, -1], 0.0)
+    # Normal velocity at walls must be zero
+    assert np.allclose(u[0, 1:-1], 0.0)
+    assert np.allclose(u[m.Nx, 1:-1], 0.0)
+    assert np.allclose(v[1:-1, 0], 0.0)
+    assert np.allclose(v[1:-1, m.Ny], 0.0)
 
 
 def test_bc_apply_smooth_lid():
@@ -68,7 +70,7 @@ def test_bc_apply_smooth_lid():
     # Smooth lid: zero at corners, peak in middle
     assert u[0, -1] == pytest.approx(0.0)
     assert u[-1, -1] == pytest.approx(0.0)
-    assert u[m.Nx // 2, -1] == pytest.approx(1.0, abs=0.01)
+    assert u[m.Nx // 2, -1] == pytest.approx(2.0, abs=0.02)
     # Bottom wall still zero
     assert np.allclose(u[:, 0], 0.0)
 
@@ -84,8 +86,8 @@ def test_bc_lid_values():
 # ── Advection ────────────────────────────────────────────────────────
 
 def test_upwind_returns_zeros_on_boundary():
-    u = np.random.randn(9, 6)
-    v = np.random.randn(8, 7)
+    u = np.random.randn(9, 8)
+    v = np.random.randn(10, 7)
     adv_u, adv_v = advection.upwind(u, v, 0.1, 0.1)
     # Boundary faces should be zero
     assert np.allclose(adv_u[0, :], 0.0)
@@ -95,16 +97,16 @@ def test_upwind_returns_zeros_on_boundary():
 
 
 def test_central_returns_zeros_on_boundary():
-    u = np.random.randn(9, 6)
-    v = np.random.randn(8, 7)
+    u = np.random.randn(9, 8)
+    v = np.random.randn(10, 7)
     adv_u, adv_v = advection.central(u, v, 0.1, 0.1)
     assert np.allclose(adv_u[0, :], 0.0)
     assert np.allclose(adv_u[-1, :], 0.0)
 
 
 def test_upwind_constant_field_gives_zero():
-    u = np.ones((9, 6)) * 3.0
-    v = np.ones((8, 7)) * 2.0
+    u = np.ones((9, 8)) * 3.0
+    v = np.ones((10, 7)) * 2.0
     adv_u, adv_v = advection.upwind(u, v, 0.1, 0.1)
     assert np.allclose(adv_u, 0.0, atol=1e-14)
     assert np.allclose(adv_v, 0.0, atol=1e-14)
@@ -123,16 +125,16 @@ def test_explicit_diffusion_preserves_bc():
     adv_v = np.zeros_like(v)
 
     u_s, v_s = explicit(u, v, adv_u, adv_v, m.dx, m.dy, 1e-4, 0.01, bc, m.Nx, m.Ny)
-    assert np.allclose(u_s[:, -1], 1.0)
-    assert np.allclose(u_s[:, 0], 0.0)
+    assert np.allclose(u_s[:, -1], 2.0, atol=1e-3)
+    assert np.allclose(u_s[:, 0], 0.0, atol=1e-3)
 
 
 def test_crank_nicolson_builds_matrices():
     m = Mesh(1.0, 1.0, 8, 6)
     bc = BoundaryConditions(top=1.0)
     cn = CrankNicolson(m, nu=0.01, dt=1e-4, bc=bc)
-    assert cn.A_u.shape == ((8 - 1) * (6 - 2), (8 - 1) * (6 - 2))
-    assert cn.A_v.shape == (8 * (6 - 1), 8 * (6 - 1))
+    assert cn.A_u.shape == ((8 - 1) * 6, (8 - 1) * 6)  # 42 x 42
+    assert cn.A_v.shape == (8 * (6 - 1), 8 * (6 - 1))  # 40 x 40
 
 
 # ── Pressure ─────────────────────────────────────────────────────────
@@ -142,10 +144,11 @@ def test_pressure_poisson_zero_divergence():
     ps = PressureSolver(m)
 
     # Uniform u_star, v_star → zero divergence → zero pressure
-    u_s = np.ones(m.shape_u)
+    u_s = np.zeros(m.shape_u)
+    u_s[:, 1:-1] = 1.0
     v_s = np.zeros(m.shape_v)
     p = ps.solve(u_s, v_s, dt=0.001)
-    assert np.allclose(p, 0.0, atol=1e-10)
+    assert np.allclose(p[1:-1, 1:-1], 0.0, atol=1e-10)
 
 
 def test_pressure_zero_mean():
@@ -155,28 +158,28 @@ def test_pressure_zero_mean():
     u_s = np.random.randn(*m.shape_u) * 0.01
     v_s = np.random.randn(*m.shape_v) * 0.01
     p = ps.solve(u_s, v_s, dt=0.001)
-    assert abs(np.mean(p)) < 1e-10
+    assert abs(np.mean(p[1:-1, 1:-1])) < 1e-10
 
 
 # ── Diagnostics ──────────────────────────────────────────────────────
 
 def test_divergence_uniform_flow():
-    u = np.ones((9, 6))
-    v = np.zeros((8, 7))
+    u = np.ones((9, 8))
+    v = np.zeros((10, 7))
     div = diagnostics.divergence(u, v, 0.1, 0.1)
     assert np.allclose(div, 0.0)
 
 
 def test_cfl_computation():
-    u = np.ones((9, 6)) * 2.0
-    v = np.ones((8, 7)) * 3.0
+    u = np.ones((9, 8)) * 2.0
+    v = np.ones((10, 7)) * 3.0
     c = diagnostics.cfl(u, v, 0.1, 0.1, 0.01)
     assert c == pytest.approx(0.5)
 
 
 def test_is_blowup():
-    u = np.ones((9, 6))
-    v = np.ones((8, 7))
+    u = np.ones((9, 8))
+    v = np.ones((10, 7))
     assert not diagnostics.is_blowup(u, v)
 
     u[3, 2] = np.nan
@@ -196,7 +199,7 @@ def test_solver_step_runs():
 def test_solver_pressure_zero_mean():
     s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
     s.step()
-    assert abs(np.mean(s.p)) < 1e-6
+    assert abs(np.mean(s.p[1:-1, 1:-1])) < 1e-6
 
 
 def test_solver_remains_finite():
