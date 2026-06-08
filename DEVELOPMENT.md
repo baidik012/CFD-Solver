@@ -196,9 +196,10 @@ Timings below are from the original development machine (Intel Core i7-13620H, L
 
 | Grid | Time | Notes |
 |------|------|-------|
-| 32×32 | < 1 s | Quick tests |
-| 128×128 | ~1–2 s | Standard runs |
-| 256×256 | ~5 s | Detailed runs |
+| 32×32 | 0.07 s | Quick tests |
+| 64×64 | 0.22 s | |
+| 128×128 | 1.1 s | Standard runs |
+| 256×256 | 5.0 s | Detailed runs |
 
 Both the pressure Poisson matrix and the Crank-Nicolson diffusion matrices are pre-factorized via `splu` at `Solver.__init__`. Each time step only does a fast triangular solve — there is no iterative inner loop.
 
