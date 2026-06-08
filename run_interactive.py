@@ -98,7 +98,7 @@ def main():
     out_path = "output/result.png"
     save_contour(s.mesh, s.u, s.v, s.p, out_path)
 
-    print()
+        print()
     print(f"  Result saved to {out_path}")
 
     # Try to open the image
@@ -108,7 +108,7 @@ def main():
         opened = True
     elif sys.platform.startswith("linux"):
         for cmd in [["xdg-open", out_path],
-                     ["explorer.exe", os.path.abspath(out_path)]]:
+                    ["explorer.exe", os.path.abspath(out_path)]]:
             try:
                 subprocess.run(cmd, check=True)
                 opened = True
@@ -116,11 +116,11 @@ def main():
             except (FileNotFoundError, subprocess.CalledProcessError):
                 continue
     elif sys.platform == "win32":
-    try:
-        os.startfile(os.path.abspath(out_path))
-        opened = True
-    except OSError:
-        pass
+        try:
+            os.startfile(os.path.abspath(out_path))
+            opened = True
+        except OSError:
+            pass
 
     if not opened:
         print(f"  Open output/result.png to view the result.")
