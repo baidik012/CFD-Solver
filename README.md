@@ -123,11 +123,12 @@ The solver auto-scales `dt` to keep the simulation stable at fine grids. You can
 
 ## Getting Started
 
-**1. Clone the repo (or download the zip):**
+**1. Clone the repo (or download a release):**
 ```bash
 git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
+Or download a versioned zip from [Releases](https://github.com/baidik012/CFD-Solver/releases).
 
 **2. Run the solver:**
 
@@ -151,7 +152,7 @@ All commands run from the root directory.
 
 ### Updating
 
-If you cloned the repo (not a zip download), pull the latest changes:
+If you cloned the repo (not a release download), pull the latest changes:
 
 - **Windows** — double-click `update.bat`
 - **Mac/Linux:**
@@ -159,7 +160,7 @@ If you cloned the repo (not a zip download), pull the latest changes:
   ./update.sh
   ```
 
-This fetches the latest code from GitHub and reinstalls dependencies if the virtual environment exists. If you downloaded a zip, re-download it to get the latest version.
+This fetches the latest code from GitHub and reinstalls dependencies if the virtual environment exists. If you downloaded a release zip, download the latest from [Releases](https://github.com/baidik012/CFD-Solver/releases).
 
 The solver also checks for updates on startup and prints a notice if your copy is behind.
 
