@@ -162,8 +162,8 @@ class CrankNicolson:
         else:
             rhs_u[:, -1] += 2.0 * ry * self.bc.top
 
-        u_flat = self._solve_u(rhs_u.flatten())
-        u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny))
+        u_flat = self._solve_u(rhs_u.flatten(order="F"))
+        u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny), order="F")
 
         # --- Solve for v ---
         rhs_v = v[1:-1, 1:-1] - dt * adv_v[1:-1, 1:-1] + 0.5 * dt * nu * lap_v
@@ -176,8 +176,8 @@ class CrankNicolson:
 
         # Note: bottom and top walls for v are exactly 0, so no contributions to add
 
-        v_flat = self._solve_v(rhs_v.flatten())
-        v_star[1:-1, 1:-1] = v_flat.reshape((Nx, Ny - 1))
+        v_flat = self._solve_v(rhs_v.flatten(order="F"))
+        v_star[1:-1, 1:-1] = v_flat.reshape((Nx, Ny - 1), order="F")
 
         self.bc.apply(u_star, v_star, Nx, Ny)
         return u_star, v_star
