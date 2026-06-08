@@ -94,8 +94,11 @@ def main():
     except Exception as exc:
         _handle_error(exc)
 
-    os.makedirs("output", exist_ok=True)
-    out_path = "output/result.png"
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(project_root, "output")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    out_path = os.path.join(output_dir, "result.png")
     save_contour(s.mesh, s.u, s.v, s.p, out_path)
 
         print()
@@ -104,20 +107,20 @@ def main():
     # Try to open the image
     opened = False
     if sys.platform == "darwin":
-        subprocess.run(["open", out_path])
+        subprocess.run(["open", out_path], check=False)
         opened = True
     elif sys.platform.startswith("linux"):
         for cmd in [["xdg-open", out_path],
                     ["explorer.exe", os.path.abspath(out_path)]]:
             try:
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, check=False)
                 opened = True
                 break
             except (FileNotFoundError, subprocess.CalledProcessError):
                 continue
     elif sys.platform == "win32":
         try:
-            os.startfile(os.path.abspath(out_path))
+            os.startfile(out_path)
             opened = True
         except OSError:
             pass
