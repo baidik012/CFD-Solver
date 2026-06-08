@@ -110,9 +110,9 @@ CFD-Solver/
 | Grid | Approx. time |
 |------|-------------|
 | 32×32 | < 1 s |
-| 64×64 | ~2–5 s |
-| 128×128 | ~30–60 s |
-| 256×256 | several minutes |
+| 64×64 | ~2–3 s |
+| 128×128 | ~1–2 s |
+| 256×256 | ~5 s |
 
 Larger grids are memory-bound — a 256×256 grid uses ~256 MB for the pressure matrix. Anything above 512×512 will need significant RAM and time.
 
