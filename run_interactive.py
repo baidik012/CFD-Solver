@@ -116,8 +116,11 @@ def main():
             except (FileNotFoundError, subprocess.CalledProcessError):
                 continue
     elif sys.platform == "win32":
-        os.startfile(out_path)
+    try:
+        os.startfile(os.path.abspath(out_path))
         opened = True
+    except OSError:
+        pass
 
     if not opened:
         print(f"  Open output/result.png to view the result.")
