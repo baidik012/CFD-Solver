@@ -101,7 +101,7 @@ def main():
     out_path = os.path.join(output_dir, "result.png")
     save_contour(s.mesh, s.u, s.v, s.p, out_path)
 
-        print()
+    print()
     print(f"  Result saved to {out_path}")
 
     # Try to open the image
