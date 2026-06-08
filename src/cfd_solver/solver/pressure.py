@@ -68,7 +68,7 @@ class PressureSolver:
 
         # Compute divergence over active cells
         div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
-        rhs = (-div / dt).flatten()
+        rhs = (-div / dt).ravel(order="F")
         
         # Pin pressure at first cell to 0
         rhs[0] = 0.0
@@ -77,7 +77,7 @@ class PressureSolver:
 
         p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
         # Populate interior physical cells
-        p[1:-1, 1:-1] = p_flat.reshape((Nx, Ny))
+        p[1:-1, 1:-1] = p_flat.reshape((Nx, Ny), order="F")
 
         # Normalize to zero mean
         p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
