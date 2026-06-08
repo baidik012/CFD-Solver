@@ -11,18 +11,19 @@ CFD-Solver/
 │   │   ├── mesh.py             # Staggered grid generation
 │   │   ├── bc.py               # Boundary conditions & smooth profiles
 │   │   ├── advection.py        # Pluggable advection schemes
-│   │   ├── diffusion.py        # Explicit Euler & Crank-Nicolson
-│   │   ├── pressure.py         # Poisson solver (CG + sparse matrix)
+│   │   ├── diffusion.py        # Explicit Euler & Crank-Nicolson (direct LU)
+│   │   ├── pressure.py         # Poisson solver (direct LU decomposition)
 │   │   ├── diagnostics.py      # CFL, divergence, blowup detection
-│   │   ├── projection.py       # Chorin step orchestration
-│   │   ├── solver.py           # Public API (Solver class)
+│   │   ├── validate.py         # YAML config schema validation
+│   │   ├── solver.py           # Public API (Chorin step & Solver class)
 │   │   └── viz.py              # Visualization (quiver + contour)
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Example scripts and configs
 ├── output/                      # Solver output images
-├── tests/                       # Unit tests (25 tests)
+├── tests/                       # Unit tests (26 tests)
 ├── run_interactive.py           # Interactive parameter prompts
+├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
 ├── run.bat / run.sh             # One-click solver launcher
 ├── pyproject.toml               # Package config
@@ -38,11 +39,11 @@ The solver is split into focused modules with clear responsibilities:
 | `mesh.py` | Grid generation, coordinate arrays, spacing |
 | `bc.py` | Boundary conditions, smooth lid profiles |
 | `advection.py` | Upwind (1st order) & central (2nd order) schemes |
-| `diffusion.py` | Explicit Euler & Crank-Nicolson semi-implicit |
-| `pressure.py` | Poisson matrix assembly + CG solve |
+| `diffusion.py` | Explicit Euler & Crank-Nicolson (matrices pre-factorized with `splu`) |
+| `pressure.py` | Poisson matrix assembly + direct LU solve (pre-factorized at init) |
 | `diagnostics.py` | CFL, divergence norms, blowup detection |
-| `projection.py` | Chorin step orchestration |
-| `solver.py` | Thin public API that wires everything together |
+| `validate.py` | YAML config schema validation |
+| `solver.py` | Public API: Chorin step, `Solver` class, checkpoint/resume |
 | `viz.py` | Unified visualization (quiver + contour) |
 
 ## Core Concepts
@@ -141,11 +142,11 @@ if s.cfl() > 1:
     print("WARNING: CFL > 1, reduce dt")
 ```
 
-**Reference data** — Lid-driven cavity has established benchmarks (Ghia et al., 1982). Compare centerline velocities:
+**Reference data** — Lid-driven cavity has established benchmarks (Ghia et al., 1982). Use `run_ghia_validation.py` for a direct comparison:
+```bash
+python run_ghia_validation.py
 ```
-u_center at x=0.5 should match published results
-v_center at y=0.5 should match published results
-```
+The script runs Re=100 (128×128 grid, 10 000 steps) and prints u- and v-centerline profiles for comparison against published Ghia tables.
 
 ## Stability Limits
 
@@ -187,7 +188,7 @@ If results look wrong:
 
 4. **Plot intermediate results.** Call `s.step()` once, inspect `s.u`, `s.v`, `s.p`.
 
-5. **Check the pressure solver.** If CG doesn't converge in < 100 iterations, the matrix is wrong.
+5. **Check the pressure solver.** The solver uses a pre-factorized direct LU solve; if pressure values look wrong, check the Poisson matrix assembly in `pressure.py`.
 
 ## Performance Tips
 
@@ -195,7 +196,22 @@ If results look wrong:
 - 128x128 for standard runs (~1-2 seconds)
 - 256x256 for detailed runs (~5-10 seconds)
 
-For large grids, the conjugate gradient solver converges in ~20-50 iterations — that's the main speedup over a naive Jacobi approach.
+Both the pressure Poisson matrix and the Crank-Nicolson diffusion matrices are pre-factorized via `splu` at `Solver.__init__`. Each time step only does a fast triangular solve — there is no iterative inner loop.
+
+## Checkpointing
+
+The solver can save and resume state:
+
+```python
+# Save state after N steps
+s.checkpoint("output/run.npz")
+
+# Resume from checkpoint
+s = Solver.from_checkpoint("output/run.npz")
+s.solve(1000)  # continue running
+```
+
+The `.npz` file stores `u`, `v`, `p`, and all solver parameters (`Nx`, `Ny`, `Lx`, `Ly`, `dt`, `nu`, `lid_speed`, `smooth_lid`, `advection_scheme`, `diffusion_scheme`). Missing optional keys fall back to defaults, so old checkpoints remain loadable.
 
 ## Running Tests
 
@@ -216,4 +232,4 @@ Then run:
 pytest
 ```
 
-All 25 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, and the full Solver API.
+All 26 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, and the full Solver API.

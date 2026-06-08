@@ -32,11 +32,6 @@ from .diagnostics import (
 from .viz import save_quiver as _save_quiver, save_contour
 
 
-# Default CG solver settings
-DEFAULT_CG_MAXITER = 1000
-DEFAULT_CG_RTOL = 1e-5
-
-
 class Solver:
     """Incompressible Navier-Stokes solver.
 
@@ -58,16 +53,11 @@ class Solver:
         "crank_nicolson" (default) or "explicit".
     Lx, Ly : float, optional
         Domain size. Default 1.0 (unit square).
-    cg_maxiter : int, optional
-        Max CG iterations. Default 1000.
-    cg_rtol : float, optional
-        CG relative tolerance. Default 1e-5.
     """
 
     def __init__(self, grid_size, nu, dt, lid_speed=1.0, smooth_lid=True,
                  advection_scheme="upwind", diffusion_scheme="crank_nicolson",
-                 Lx=1.0, Ly=1.0, cg_maxiter=DEFAULT_CG_MAXITER,
-                 cg_rtol=DEFAULT_CG_RTOL):
+                 Lx=1.0, Ly=1.0):
         Nx, Ny = grid_size
 
         self.mesh = Mesh(Lx, Ly, Nx, Ny)
@@ -92,19 +82,14 @@ class Solver:
 
         # Build diffusion solver
         if diffusion_scheme == "crank_nicolson":
-            self._diffusion = CrankNicolson(
-                self.mesh, nu, dt, self.bc,
-                cg_maxiter=cg_maxiter, cg_rtol=cg_rtol,
-            )
+            self._diffusion = CrankNicolson(self.mesh, nu, dt, self.bc)
         elif diffusion_scheme == "explicit":
             self._diffusion = None
         else:
             raise ValueError(f"Unknown diffusion scheme: {diffusion_scheme}")
 
         # Build pressure solver
-        self._pressure = PressureSolver(
-            self.mesh, cg_maxiter=cg_maxiter, cg_rtol=cg_rtol,
-        )
+        self._pressure = PressureSolver(self.mesh)
 
         # Apply initial BCs
         self.bc.apply(self.u, self.v, Nx, Ny)
@@ -175,9 +160,13 @@ class Solver:
 
             if is_blowup(self.u, self.v):
                 if verbose:
+                    c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                    safe_dt = self.dt / max(c, 1.0) * 0.8
                     print(
-                        f"\nStep {i:4d}: BLOWUP — velocity is NaN/Inf.\n"
-                        f"  Try: smaller dt, smaller lid_speed, or smooth_lid=True."
+                        f"\nStep {i:4d}: BLOWUP — velocity is NaN/Inf."
+                        f"  CFL at last step: {c:.2f}\n"
+                        f"  Try: dt <= {safe_dt:.4g}  (currently {self.dt}),"
+                        f" smaller lid_speed, or smooth_lid=True."
                     )
                 return
 
@@ -222,8 +211,16 @@ class Solver:
         _save_quiver(self.mesh, self.u, self.v, path, skip, scale)
 
     def checkpoint(self, path):
-        """Save solver state to a .npz file for resume later."""
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        """Save solver state to a .npz file for resume later.
+
+        Parameters
+        ----------
+        path : str
+            Destination file path. Parent directories are created automatically.
+            A `.npz` extension is added by NumPy if not already present.
+        """
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
         np.savez_compressed(
             path,
             u=self.u, v=self.v, p=self.p,

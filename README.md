@@ -55,15 +55,15 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 **Numerical schemes:**
 - Advection: upwind (1st order) or central (2nd order) — pluggable
-- Diffusion: Crank-Nicolson semi-implicit (unconditionally stable) or explicit Euler
-- Pressure: Conjugate gradient with sparse matrix
+- Diffusion: Crank-Nicolson semi-implicit (unconditionally stable) with pre-factorized direct LU solver
+- Pressure: Direct sparse LU solver (pre-factorized at init) — fast constant-coefficient solve per step
 
 | Term | What it means |
 |------|---------------|
 | C-grid | Staggered arrangement: u/v at faces, p at centers |
 | Projection | Guess first, fix the pressure later |
 | Divergence-free | Fluid coming in must go out |
-| Crank-Nicolson | Semi-implicit diffusion, stable for any dt |
+| Direct Solver | Solve AX=B once by factoring A; very fast for constant matrices |
 
 ---
 
@@ -76,18 +76,19 @@ CFD-Solver/
 │   │   ├── mesh.py             # Staggered grid generation
 │   │   ├── bc.py               # Boundary conditions
 │   │   ├── advection.py        # Upwind & central difference schemes
-│   │   ├── diffusion.py        # Explicit Euler & Crank-Nicolson
-│   │   ├── pressure.py         # Poisson solver (CG + sparse matrix)
+│   │   ├── diffusion.py        # Crank-Nicolson with direct LU solver
+│   │   ├── pressure.py         # Poisson solver (direct LU decomposition)
 │   │   ├── diagnostics.py      # CFL, divergence, blowup detection
-│   │   ├── projection.py       # Chorin step orchestration
-│   │   ├── solver.py           # Public API (Solver class)
+│   │   ├── validate.py         # YAML config schema validation
+│   │   ├── solver.py           # Public API (Chorin step & Solver class)
 │   │   └── viz.py              # Visualization (quiver + contour)
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Ready-to-run simulations
 ├── output/                      # Results and plots
-├── tests/                       # Unit tests (25 tests)
+├── tests/                       # Unit tests (26 tests)
 ├── run_interactive.py           # Interactive parameter setup
+├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
 ├── run.bat / run.sh             # One-click solver launcher
 ├── pyproject.toml               # Package configuration
