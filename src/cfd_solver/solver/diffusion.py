@@ -7,7 +7,7 @@ Available schemes:
 
 import numpy as np
 from scipy.sparse import diags, eye, kron
-from scipy.sparse.linalg import cg
+from scipy.sparse.linalg import cg, splu
 
 
 def explicit(u, v, adv_u, adv_v, dx, dy, dt, nu, bc, Nx, Ny):
@@ -62,8 +62,12 @@ class CrankNicolson:
         self.cg_maxiter = cg_maxiter
         self.cg_rtol = cg_rtol
 
-        self.A_u = self._build_u_matrix()
-        self.A_v = self._build_v_matrix()
+        self.A_u = self._build_u_matrix().tocsc()
+        self.A_v = self._build_v_matrix().tocsc()
+
+        # Pre-factorize for speed (matrix is constant)
+        self._solve_u = splu(self.A_u).solve
+        self._solve_v = splu(self.A_v).solve
 
     def _build_u_matrix(self):
         """Build (I - 0.5*dt*nu*L) for active u unknowns: i=1..Nx-1, j=1..Ny."""
@@ -158,10 +162,7 @@ class CrankNicolson:
         else:
             rhs_u[:, -1] += 2.0 * ry * self.bc.top
 
-        u_flat, info = cg(self.A_u, rhs_u.flatten(), maxiter=self.cg_maxiter, rtol=self.cg_rtol)
-        if info != 0:
-            u_star[:] = np.nan
-            return u_star, v_star
+        u_flat = self._solve_u(rhs_u.flatten())
         u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny))
 
         # --- Solve for v ---
@@ -175,10 +176,7 @@ class CrankNicolson:
 
         # Note: bottom and top walls for v are exactly 0, so no contributions to add
 
-        v_flat, info = cg(self.A_v, rhs_v.flatten(), maxiter=self.cg_maxiter, rtol=self.cg_rtol)
-        if info != 0:
-            u_star[:] = np.nan
-            return u_star, v_star
+        v_flat = self._solve_v(rhs_v.flatten())
         v_star[1:-1, 1:-1] = v_flat.reshape((Nx, Ny - 1))
 
         self.bc.apply(u_star, v_star, Nx, Ny)

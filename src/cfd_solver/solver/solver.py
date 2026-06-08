@@ -154,8 +154,13 @@ class Solver:
 
         self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
-        grad_p_x = (self.p[2:-1, 1:-1] - self.p[1:-2, 1:-1]) / dx
-        grad_p_y = (self.p[1:-1, 2:-1] - self.p[1:-1, 1:-2]) / dy
+        # Pressure gradient must align with staggered C-grid:
+        # u lives on x-faces => du = -dt * (p[i] - p[i-1]) / dx
+        # v lives on y-faces => dv = -dt * (p[j] - p[j-1]) / dy
+        # Interior u faces are i=1..Nx-1. Gradient at face i uses cells i and i+1.
+        # In p array, cells 1..Nx are physical. Face i=1 is between p[1] and p[2].
+        grad_p_x = (self.p[2:-1, 1:-1] - self.p[1:-2, 1:-1]) / dx  # (Nx-1, Ny)
+        grad_p_y = (self.p[1:-1, 2:-1] - self.p[1:-1, 1:-2]) / dy  # (Nx, Ny-1)
 
         self.u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x
         self.v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y
