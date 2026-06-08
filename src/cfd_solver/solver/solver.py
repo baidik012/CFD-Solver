@@ -62,6 +62,13 @@ class Solver:
 
         self.mesh = Mesh(Lx, Ly, Nx, Ny)
         self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
+
+        # Auto-scale dt to keep CFL < 1 if the user's dt is too large
+        dx, dy = self.mesh.dx, self.mesh.dy
+        dt_max = min(dx, dy) / max(lid_speed, 1e-10) * 0.1
+        if dt > dt_max:
+            dt = dt_max
+
         self.dt = dt
         self.nu = nu
         self.advection_scheme = advection_scheme

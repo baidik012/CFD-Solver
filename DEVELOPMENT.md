@@ -200,6 +200,9 @@ Timings below are from the original development machine (Intel Core i7-13620H, L
 | 64×64 | 0.22 s | |
 | 128×128 | 1.1 s | Standard runs |
 | 256×256 | 5.0 s | Detailed runs |
+| 1024×1024 | ~170 s | High resolution |
+
+The solver auto-scales `dt` to keep CFL < 1 at fine grids. At 1024×1024, `dt` is reduced from 0.001 to ~1e-4 automatically.
 
 Both the pressure Poisson matrix and the Crank-Nicolson diffusion matrices are pre-factorized via `splu` at `Solver.__init__`. Each time step only does a fast triangular solve — there is no iterative inner loop.
 

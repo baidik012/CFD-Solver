@@ -113,8 +113,11 @@ CFD-Solver/
 | 64×64 | 0.22 s |
 | 128×128 | 1.1 s |
 | 256×256 | 5.0 s |
+| 1024×1024 | ~170 s |
 
 Larger grids are memory-bound — a 256×256 grid uses ~256 MB for the pressure matrix. Anything above 512×512 will need significant RAM and time.
+
+The solver auto-scales `dt` to keep the simulation stable at fine grids. You can pass any `dt` value and the solver will reduce it if needed.
 
 ---
 
