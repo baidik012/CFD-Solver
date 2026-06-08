@@ -25,11 +25,11 @@ REM Install dependencies if numpy is not available
 %VENV_PYTHON% -c "import numpy" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [..] Installing dependencies...
-    %VENV_PYTHON% -m pip install -r requirements.txt -q
+    %VENV_PYTHON% -m pip install -r requirements.txt
     if %errorlevel% neq 0 (
         echo.
         echo ERROR: Failed to install dependencies.
-        echo Try running: venv\Scripts\pip.exe install -r requirements.txt
+        echo Try running manually: venv\Scripts\pip.exe install -r requirements.txt
         pause
         exit /b 1
     )
