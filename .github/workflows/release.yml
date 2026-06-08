@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build tools
+        run: pip install build setuptools-scm
+
+      - name: Build distribution
+        run: python -m build --sdist --wheel
+
+      - name: Create zip archive
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          ARCHIVE_NAME="CFD-Solver-v${VERSION}"
+          zip -r "${ARCHIVE_NAME}.zip" . \
+            -x ".git/*" "venv/*" "output/*" "__pycache__/*" "*.pyc" \
+               "src/cfd_solver.egg-info/*" ".pytest_cache/*"
+          echo "ARCHIVE=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
+          generate_release_notes: true
+          name: "CFD Solver ${{ github.ref_name }}"

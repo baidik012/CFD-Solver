@@ -49,10 +49,17 @@ def main():
     except Exception:
         pass  # never let a version-check failure block the solver
 
+    try:
+        from cfd_solver import __version__
+        version_str = __version__
+    except Exception:
+        version_str = "unknown"
+
     print()
     print("========================================")
     print("  CFD Solver — Interactive Setup")
     print("========================================")
+    print(f"  Version: {version_str}")
     print()
     print("Press Enter to accept defaults shown in [brackets].")
     print()

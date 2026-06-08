@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cfd-solver"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Incompressible fluid flow solver using Chorin's projection method"
 requires-python = ">=3.10"
 dependencies = [
@@ -24,3 +24,6 @@ cfd = "cfd_solver.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+tag_regex = "^v?(?P<version>[0-9]+(?:\\.[0-9]+)*)$"

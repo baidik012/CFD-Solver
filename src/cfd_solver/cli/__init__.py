@@ -91,10 +91,12 @@ def run(args):
 
 
 def main():
+    from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
     check_for_updates()
 
-    parser = argparse.ArgumentParser(description="CFD Solver")
+    parser = argparse.ArgumentParser(description=f"CFD Solver v{__version__}")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(required=True)
 
     run_parser = sub.add_parser("run", help="Run a simulation")

@@ -32,6 +32,10 @@ echo "[..] Fetching latest changes from GitHub..."
 git pull origin main
 echo "[OK] Code updated"
 
+# Show the current version
+VERSION=$(git describe --tags --always 2>/dev/null || echo "unknown")
+echo "[OK] Current version: ${VERSION}"
+
 # Re-install the package in case dependencies or entry points changed
 if [ -d "venv" ]; then
     echo "[..] Updating dependencies..."
@@ -39,6 +43,8 @@ if [ -d "venv" ]; then
     pip install -r requirements.txt -q
     pip install -e . -q
     echo "[OK] Dependencies up to date"
+    PKG_VERSION=$(python -c "from cfd_solver import __version__; print(__version__)" 2>/dev/null || echo "unknown")
+    echo "[OK] Package version: ${PKG_VERSION}"
 else
     echo "[SKIP] No virtual environment found (run ./setup.sh first)"
 fi

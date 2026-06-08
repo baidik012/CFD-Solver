@@ -38,16 +38,23 @@ if exist venv\ (
     echo [OK] Virtual environment created
 )
 
-REM Activate and install
+REM Install dependencies and the solver package using venv Python directly
 echo [..] Installing dependencies...
-call venv\Scripts\activate.bat
-pip install -r requirements.txt
+venv\Scripts\python.exe -m pip install -r requirements.txt -q
 if %errorlevel% neq 0 (
     echo.
     echo WARNING: Some packages failed to install.
-    echo Try running: pip install -r requirements.txt
+    echo Try running: venv\Scripts\pip.exe install -r requirements.txt
 )
 echo [OK] Dependencies installed
+
+echo [..] Installing solver package...
+venv\Scripts\python.exe -m pip install -e . -q
+if %errorlevel% neq 0 (
+    echo WARNING: Failed to install solver package in editable mode.
+    echo The solver will still run from source.
+)
+echo [OK] Solver package installed
 
 echo.
 echo ========================================

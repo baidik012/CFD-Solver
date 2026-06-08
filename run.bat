@@ -18,22 +18,35 @@ if not exist venv\ (
     echo [OK] Virtual environment created
 )
 
-call venv\Scripts\activate.bat
+REM Use venv Python directly — no activation needed
+set VENV_PYTHON=venv\Scripts\python.exe
 
 REM Install dependencies if numpy is not available
-python -c "import numpy" >nul 2>&1
+%VENV_PYTHON% -c "import numpy" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [..] Installing dependencies...
-    pip install -r requirements.txt
+    %VENV_PYTHON% -m pip install -r requirements.txt -q
     if %errorlevel% neq 0 (
         echo.
         echo ERROR: Failed to install dependencies.
-        echo Try running: pip install -r requirements.txt
+        echo Try running: venv\Scripts\pip.exe install -r requirements.txt
         pause
         exit /b 1
     )
     echo [OK] Dependencies installed
 )
 
-python run_interactive.py
+REM Ensure the solver package is installed
+%VENV_PYTHON% -c "import cfd_solver" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [..] Installing solver package...
+    %VENV_PYTHON% -m pip install -e . -q
+    if %errorlevel% neq 0 (
+        echo WARNING: Failed to install solver package. Running from source.
+    ) else (
+        echo [OK] Solver package installed
+    )
+)
+
+%VENV_PYTHON% run_interactive.py
 pause
