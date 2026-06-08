@@ -146,6 +146,20 @@ pytest
 
 All commands run from the root directory.
 
+### Updating
+
+If you cloned the repo (not a zip download), pull the latest changes:
+
+- **Windows** — double-click `update.bat`
+- **Mac/Linux:**
+  ```bash
+  ./update.sh
+  ```
+
+This fetches the latest code from GitHub and reinstalls dependencies if the virtual environment exists. If you downloaded a zip, re-download it to get the latest version.
+
+The solver also checks for updates on startup and prints a notice if your copy is behind.
+
 ---
 
 ## Contributing

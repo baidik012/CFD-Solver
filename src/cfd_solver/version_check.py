@@ -59,7 +59,9 @@ def check_for_updates(repo_dir=None):
         return False  # not a git repo, or git not installed
 
     if local == remote:
-        return False  # already up to date
+        import sys
+        print("  You're up to date.", file=sys.stderr)
+        return False
 
     # Count how many commits behind we are
     behind_str = _run(
