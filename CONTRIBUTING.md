@@ -11,7 +11,11 @@ Here's how we work together on this project.
 
 2. **Write the code.** Keep it readable. If it's not obvious what something does, add a comment.
 
-3. **Test it.** Run `pytest tests/` before you open a PR.
+3. **Test it.** Install dev dependencies and run tests before you open a PR:
+   ```bash
+   pip install -e ".[dev]"
+   pytest tests/
+   ```
 
 4. **Commit.** Write a short message explaining *what* changed and *why*.
    ```bash

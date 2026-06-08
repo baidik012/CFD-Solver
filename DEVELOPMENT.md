@@ -192,11 +192,17 @@ If results look wrong:
 
 ## Performance Tips
 
-- 32x32 is good for quick tests (< 1 second)
-- 128x128 for standard runs (~1-2 seconds)
-- 256x256 for detailed runs (~5-10 seconds)
+Timings below are from the original development machine (Intel Core i7-13620H, Linux), 200 time steps:
+
+| Grid | Time | Notes |
+|------|------|-------|
+| 32×32 | < 1 s | Quick tests |
+| 128×128 | ~1–2 s | Standard runs |
+| 256×256 | ~5–10 s | Detailed runs |
 
 Both the pressure Poisson matrix and the Crank-Nicolson diffusion matrices are pre-factorized via `splu` at `Solver.__init__`. Each time step only does a fast triangular solve — there is no iterative inner loop.
+
+Scaling is roughly O(N²) where N = Nx × Ny. A 2× grid increase ~quadruples runtime.
 
 ## Checkpointing
 
@@ -215,7 +221,7 @@ The `.npz` file stores `u`, `v`, `p`, and all solver parameters (`Nx`, `Ny`, `Lx
 
 ## Running Tests
 
-First, activate the virtual environment:
+First, activate the virtual environment and install dev dependencies:
 ```bash
 # Mac/Linux
 source venv/bin/activate
@@ -227,8 +233,9 @@ venv\Scripts\activate
 source venv/Scripts/activate
 ```
 
-Then run:
+Then install dev dependencies and run:
 ```bash
+pip install -e ".[dev]"
 pytest
 ```
 

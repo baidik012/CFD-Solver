@@ -91,6 +91,9 @@ def run(args):
 
 
 def main():
+    from cfd_solver.version_check import check_for_updates
+    check_for_updates()
+
     parser = argparse.ArgumentParser(description="CFD Solver")
     sub = parser.add_subparsers(required=True)
 

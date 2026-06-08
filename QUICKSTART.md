@@ -88,15 +88,15 @@ If the repo is **private**, GitHub will ask for credentials:
 
 ## Part 3: Set Up the Environment
 
-**Windows** — double-click `setup.bat` in the repo folder.
+**You can skip this step.** Running the solver (`run.bat` / `./run.sh`) automatically creates a virtual environment and installs all dependencies on first run.
 
-**Mac/Linux:**
-```bash
-chmod +x setup.sh
-./setup.sh
-```
-
-This creates a virtual environment and installs everything automatically. Takes about a minute.
+If you prefer to set up manually:
+- **Windows** — double-click `setup.bat`
+- **Mac/Linux:**
+  ```bash
+  chmod +x setup.sh
+  ./setup.sh
+  ```
 
 ---
 
@@ -110,7 +110,7 @@ chmod +x run.sh
 ./run.sh
 ```
 
-You'll see prompts like:
+On first run, this automatically creates a virtual environment and installs dependencies. You'll see prompts like:
 ```
 Grid cells in x [32]:
 Grid cells in y [32]:
@@ -154,10 +154,7 @@ Python isn't in your PATH. Reinstall Python and check "Add Python to PATH".
 
 ### "pip not found"
 
-Run this:
-```bash
-python -m pip install -r requirements.txt
-```
+Python isn't in your PATH. Reinstall Python and check "Add Python to PATH". The solver scripts handle pip automatically once Python is available.
 
 ---
 
@@ -171,14 +168,11 @@ Run `pwd` to check your current directory. It should end with `CFD-Solver`.
 
 ### Import error or missing package
 
-Deactivate and re-create the environment:
+Delete the virtual environment and re-run the solver — it will recreate everything:
 ```bash
-deactivate
 rm -rf venv          # Windows: rmdir /s /q venv
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
 ```
+Then run `run.bat` or `./run.sh` again.
 
 ---
 

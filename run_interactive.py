@@ -41,6 +41,14 @@ def ask(prompt, default):
 
 
 def main():
+    # Check for updates before showing the banner so the notice appears first
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+        from cfd_solver.version_check import check_for_updates
+        check_for_updates(repo_dir=os.path.dirname(__file__) or ".")
+    except Exception:
+        pass  # never let a version-check failure block the solver
+
     print()
     print("========================================")
     print("  CFD Solver — Interactive Setup")

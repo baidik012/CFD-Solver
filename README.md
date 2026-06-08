@@ -97,46 +97,50 @@ CFD-Solver/
 
 ---
 
+## System Requirements
+
+- **Python** 3.10 or newer
+- **OS:** Windows, macOS, or Linux
+- **Hardware:** Any modern CPU (x86_64 or ARM). No GPU required.
+
+**Original development machine:** Intel Core i7-13620H (10 cores, up to 5.0 GHz), 16 GB RAM, Linux.
+
+**Expected performance (200 time steps):**
+
+| Grid | Approx. time |
+|------|-------------|
+| 32×32 | < 1 s |
+| 64×64 | ~2–5 s |
+| 128×128 | ~30–60 s |
+| 256×256 | several minutes |
+
+Larger grids are memory-bound — a 256×256 grid uses ~256 MB for the pressure matrix. Anything above 512×512 will need significant RAM and time.
+
+---
+
 ## Getting Started
 
-**1. Clone the repo:**
+**1. Clone the repo (or download the zip):**
 ```bash
 git clone https://github.com/baidik012/CFD-Solver.git
 cd CFD-Solver
 ```
 
-**2. Set up environment:**
-
-- **Windows** — double-click `setup.bat`
-- **Mac/Linux** — run `./setup.sh`
-
-Both create a virtual environment and install everything automatically.
-
-### Run a simulation
+**2. Run the solver:**
 
 - **Windows** — double-click `run.bat`
 - **Mac/Linux** — run `./run.sh`
 
-You'll be asked for simulation parameters (grid size, viscosity, time steps, etc.) with sensible defaults. Just press Enter to accept the defaults. The solver runs and opens the result image automatically.
+That's it. On first run, the script automatically creates a virtual environment and installs all dependencies. You'll be asked for simulation parameters (grid size, viscosity, time steps, etc.) with sensible defaults. Just press Enter to accept the defaults. The solver runs and opens the result image automatically.
 
-No code editing or YAML files needed.
+No code editing, YAML files, or separate setup step needed.
 
 ### Run tests
 
-First, activate the virtual environment:
+Install dev dependencies and run pytest:
 ```bash
-# Mac/Linux
-source venv/bin/activate
-
-# Windows (Command Prompt)
-venv\Scripts\activate
-
-# Windows (Git Bash)
-source venv/Scripts/activate
-```
-
-Then run:
-```bash
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -e ".[dev]"
 pytest
 ```
 
