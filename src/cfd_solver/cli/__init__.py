@@ -100,11 +100,33 @@ def run(args):
         top = bc_cfg.get("top", {})
         top_u = top.get("u", 1.0)
         smooth = bc_cfg.get("smooth_lid", True)
+        advection_scheme = cfg.get("advection_scheme", "upwind")
+        diffusion_scheme = cfg.get("diffusion_scheme", "crank_nicolson")
+
+        # Warn about validated-but-unsupported fields rather than silently
+        # ignoring them, so configs are never silently misinterpreted.
+        ignored = []
+        if top.get("v") not in (None, 0, 0.0):
+            ignored.append("boundary.top.v")
+        other = bc_cfg.get("other", {})
+        if any(other.get(k) not in (None, 0, 0.0) for k in ("u", "v")):
+            ignored.append("boundary.other")
+        for key in ("cg_maxiter", "cg_rtol"):
+            if key in cfg:
+                ignored.append(key)
+        if ignored:
+            print(
+                f"  [warning] Config fields not supported by the solver and "
+                f"ignored: {', '.join(ignored)}",
+                file=sys.stderr,
+            )
 
         # Initialize the solver
         solver = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt, lid_speed=top_u,
             smooth_lid=smooth, Lx=Lx, Ly=Ly,
+            advection_scheme=advection_scheme,
+            diffusion_scheme=diffusion_scheme,
         )
 
     # Simulation loop
