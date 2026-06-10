@@ -1,7 +1,8 @@
-"""Lightweight version check against the remote GitHub repository.
+"""
+Lightweight version check against the remote GitHub repository.
 
 Compares the local git HEAD commit to the latest commit on origin/main.
-Prints a one-line notice if the local copy is behind — no network call is
+Prints a one-line notice if the local copy is behind. No network call is
 made unless git fetch succeeds silently in the background.
 
 Designed to be called once at CLI startup. All failures are swallowed so
@@ -17,7 +18,21 @@ _UPDATE_CMD_WIN  = "update.bat"
 
 
 def _run(cmd, **kwargs):
-    """Run a subprocess and return stdout, or None on any failure."""
+    """
+    Run a subprocess and return its stdout.
+
+    Parameters
+    ----------
+    cmd : list of str
+        The command to execute as a list of arguments.
+    **kwargs : dict
+        Additional keyword arguments passed to subprocess.run.
+
+    Returns
+    -------
+    str or None
+        The trimmed stdout of the command, or None if the command failed.
+    """
     try:
         result = subprocess.run(
             cmd,
@@ -34,17 +49,19 @@ def _run(cmd, **kwargs):
 
 
 def check_for_updates(repo_dir=None):
-    """Print a notice if the local repo is behind origin/main.
+    """
+    Print a notice if the local repository is behind origin/main.
 
     Parameters
     ----------
-    repo_dir : str or None
-        Path to the git repo root. Defaults to the current working directory.
+    repo_dir : str, optional
+        Path to the git repository root. Defaults to the current working directory.
 
     Returns
     -------
     bool
-        True if an update is available, False otherwise (including on error).
+        True if an update is available (local is behind remote),
+        False otherwise (including on any error or if up-to-date).
     """
     cwd = repo_dir  # None → subprocess inherits the caller's cwd
 
@@ -52,18 +69,19 @@ def check_for_updates(repo_dir=None):
     # Use --quiet and a short timeout to avoid visible delays.
     _run(["git", "fetch", "origin", "main", "--quiet"], cwd=cwd)
 
+    # Get local and remote commit hashes
     local  = _run(["git", "rev-parse", "HEAD"],            cwd=cwd)
     remote = _run(["git", "rev-parse", "origin/main"],     cwd=cwd)
 
     if not local or not remote:
-        return False  # not a git repo, or git not installed
+        return False  # Not a git repo, git not installed, or remote not reachable
 
     if local == remote:
         import sys
         print("  You're up to date.", file=sys.stderr)
         return False
 
-    # Count how many commits behind we are
+    # Count how many commits behind the local HEAD is
     behind_str = _run(
         ["git", "rev-list", "--count", f"HEAD..origin/main"],
         cwd=cwd,

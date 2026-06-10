@@ -1,4 +1,10 @@
-"""Command-line interface."""
+"""
+Command-line interface for the CFD Solver.
+
+This subpackage implements the 'cfd-solver' command-line tool, allowing users
+to run simulations using configuration files, resume from checkpoints,
+and save visualizations.
+"""
 
 import argparse
 import os
@@ -26,7 +32,14 @@ _FRIENDLY_ERRORS = {
 
 
 def _handle_error(exc):
-    """Print a user-friendly message and exit."""
+    """
+    Print a user-friendly message and exit.
+
+    Parameters
+    ----------
+    exc : Exception
+        The exception that was raised.
+    """
     print("\n" + "=" * 50, file=sys.stderr)
     print("  ERROR", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
@@ -42,7 +55,16 @@ def _handle_error(exc):
 
 
 def run(args):
+    """
+    Execute the simulation based on command-line arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The parsed command-line arguments.
+    """
     if args.resume:
+        # Resume from an existing checkpoint
         if not os.path.exists(args.resume):
             print(f"Error: checkpoint not found: {args.resume}")
             raise SystemExit(1)
@@ -50,6 +72,7 @@ def run(args):
         with open(args.config) as f:
             cfg = yaml.safe_load(f) or {}
     else:
+        # Start a new simulation from a config file
         if not os.path.exists(args.config):
             print(f"Error: config file not found: {args.config}")
             raise SystemExit(1)
@@ -57,6 +80,7 @@ def run(args):
         with open(args.config) as f:
             cfg = yaml.safe_load(f)
 
+        # Validate the configuration schema
         errors = validate_config(cfg)
         if errors:
             print("Config validation errors:", file=sys.stderr)
@@ -64,6 +88,7 @@ def run(args):
                 print(f"  - {e}", file=sys.stderr)
             raise SystemExit(1)
 
+        # Extract parameters from config
         geo = cfg["geometry"]
         Lx, Ly = geo["Lx"], geo["Ly"]
         Nx, Ny = geo["Nx"], geo["Ny"]
@@ -75,15 +100,19 @@ def run(args):
         top_u = top.get("u", 1.0)
         smooth = bc_cfg.get("smooth_lid", True)
 
+        # Initialize the solver
         solver = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt, lid_speed=top_u,
             smooth_lid=smooth, Lx=Lx, Ly=Ly,
         )
 
+    # Simulation loop
     steps = cfg.get("steps", 200)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
     solver.solve(steps, verbose=True)
+    
+    # Save results and checkpoint
     save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
     solver.checkpoint(args.output.rsplit(".", 1)[0] + ".npz")
 
@@ -91,6 +120,11 @@ def run(args):
 
 
 def main():
+    """
+    Main entry point for the CLI.
+    
+    Parses arguments, checks for updates, and dispatches to the appropriate command.
+    """
     from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
     check_for_updates()
@@ -99,6 +133,7 @@ def main():
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(required=True)
 
+    # 'run' subcommand
     run_parser = sub.add_parser("run", help="Run a simulation")
     run_parser.add_argument("config", help="YAML config file")
     run_parser.add_argument(

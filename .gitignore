@@ -26,3 +26,14 @@ output/
 # Temp
 _run_config.yaml
 venv/
+venv_check/
+venv_test/
+verify_guardrails.py
+reproduce_issue.py
+chaos_test.py
+compare_ghia.py
+run_extreme_cases.py
+verify_dt_validation.py
+verify_checkpoint_security.py
+verify_validation.py
+test_force.py

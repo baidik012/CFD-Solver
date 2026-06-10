@@ -1,4 +1,10 @@
-"""Interactive solver launcher — asks for parameters, runs simulation."""
+"""
+Interactive solver launcher — asks for parameters, runs simulation.
+
+This script provides a user-friendly way to configure and run the CFD solver
+interactively through the terminal. It prompts for physical and numerical
+parameters, executes the simulation, and displays the result.
+"""
 
 import os
 import sys
@@ -19,7 +25,14 @@ _FRIENDLY_ERRORS = {
 
 
 def _handle_error(exc):
-    """Print a user-friendly message and exit."""
+    """
+    Print a user-friendly message and exit.
+
+    Parameters
+    ----------
+    exc : Exception
+        The exception that was raised.
+    """
     print("\n" + "=" * 50)
     print("  ERROR")
     print("=" * 50)
@@ -35,12 +48,32 @@ def _handle_error(exc):
 
 
 def ask(prompt, default):
-    """Prompt user for input, return default if empty."""
+    """
+    Prompt user for input, return default if empty.
+
+    Parameters
+    ----------
+    prompt : str
+        The question to display to the user.
+    default : any
+        The default value if the user provides no input.
+
+    Returns
+    -------
+    any
+        The user input cast to the type of the default value, or the default value.
+    """
     val = input(f"  {prompt} [{default}]: ").strip()
     return type(default)(val) if val else default
 
 
 def main():
+    """
+    Main entry point for the interactive CFD solver.
+
+    Handles the interactive loop: checking for updates, displaying the banner,
+    gathering parameters, running the solver, and saving/opening the results.
+    """
     # Check for updates before showing the banner so the notice appears first
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -64,6 +97,7 @@ def main():
     print("Press Enter to accept defaults shown in [brackets].")
     print()
 
+    # Gather simulation parameters
     Nx = ask("Grid cells in x", 32)
     Ny = ask("Grid cells in y", 32)
     nu = ask("Viscosity (nu)", 0.01)
@@ -86,6 +120,7 @@ def main():
         _handle_error(exc)
 
     try:
+        # Initialize and run the solver
         s = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt,
             lid_speed=top_u, smooth_lid=smooth_lid,
@@ -94,17 +129,19 @@ def main():
     except Exception as exc:
         _handle_error(exc)
 
+    # Prepare output directory
     project_root = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(project_root, "output")
     os.makedirs(output_dir, exist_ok=True)
     
+    # Save the visualization
     out_path = os.path.join(output_dir, "result.png")
     save_contour(s.mesh, s.u, s.v, s.p, out_path)
 
     print()
     print(f"  Result saved to {out_path}")
 
-    # Try to open the image
+    # Attempt to automatically open the generated image
     opened = False
     if sys.platform == "darwin":
         subprocess.run(["open", out_path], check=False)

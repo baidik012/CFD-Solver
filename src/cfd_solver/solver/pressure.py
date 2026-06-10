@@ -1,7 +1,20 @@
-"""Pressure Poisson solver for staggered incompressible flow with ghost cells.
+"""Pressure Poisson solver for staggered incompressible flow.
 
-Builds a positive-Laplacian operator with Neumann walls and a pinned
-reference pressure, then solves via conjugate gradient.
+This module implements the pressure projection step of Chorin's method.
+After an intermediate velocity field (u*, v*) is calculated (accounting for
+advection and diffusion), it generally will not satisfy the incompressibility
+constraint (∇·u = 0).
+
+Pressure Poisson Equation (PPE):
+--------------------------------
+The projection step finds a pressure field 'p' such that the corrected
+velocity u = u* - dt*∇p is divergence-free. Taking the divergence of this
+equation leads to the PPE:
+    ∇²p = (∇·u*) / dt
+
+Solving this Poisson equation with Neumann boundary conditions (∂p/∂n = 0)
+allows us to project the intermediate velocity onto the space of
+divergence-free fields.
 """
 
 import numpy as np
@@ -12,7 +25,25 @@ from scipy.sparse.linalg import splu
 class PressureSolver:
     """Pressure Poisson solver with Neumann boundary conditions.
 
-    Uses a pre-factorized sparse Laplacian operator for speed.
+    The solver builds a discrete Laplacian operator (A) and uses a direct
+    sparse solver (superLU via splu) for efficiency. Since the Poisson
+    problem with pure Neumann BCs is singular (defined only up to an
+    additive constant), we pin one pressure value to zero to ensure a
+    unique solution.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        The computational mesh.
+    cg_maxiter : int, optional
+        Maximum iterations for the iterative solver (if used).
+    cg_rtol : float, optional
+        Relative tolerance for the iterative solver (if used).
+
+    Attributes
+    ----------
+    A : csc_matrix
+        The discrete Laplacian operator.
     """
 
     def __init__(self, mesh, cg_maxiter=1000, cg_rtol=1e-5):
@@ -21,16 +52,19 @@ class PressureSolver:
         self.dx = mesh.dx
         self.dy = mesh.dy
 
-        # Build constant Poisson matrix
+        # Build the constant Poisson matrix once during initialization
         self.A = self._build_matrix()
         self._solve = splu(self.A).solve
 
     def _build_matrix(self):
+        """Build the discrete 2D Laplacian operator with Neumann BCs."""
         Nx, Ny = self.Nx, self.Ny
         inv_dx2 = 1.0 / (self.dx**2)
         inv_dy2 = 1.0 / (self.dy**2)
 
         # 1D Laplacian with Neumann boundaries in x
+        # ∂²p/∂x² ≈ (p[i+1] - 2p[i] + p[i-1]) / dx²
+        # At boundaries, p[ghost] = p[neighbor] => (p[neighbor] - p[i]) / dx²
         diag_x = np.full(Nx, 2.0 * inv_dx2)
         diag_x[0] = inv_dx2
         diag_x[-1] = inv_dx2
@@ -47,28 +81,39 @@ class PressureSolver:
         I_Nx = eye(Nx, format="csr")
         I_Ny = eye(Ny, format="csr")
 
-        # Combine into 2D Laplacian: A = I_Ny \otimes Lx + Ly \otimes I_Nx
-        # Note: kron(I_Ny, Lx) handles x-derivatives, kron(Ly, I_Nx) handles y-derivatives
+        # Combine into 2D Laplacian via Kronecker product: A = Ly ⊕ Lx
         A = kron(I_Ny, Lx) + kron(Ly, I_Nx)
 
-        # Pin pressure at first cell (0,0) to ensure a unique solution
+        # Pin pressure at the first cell (0,0) to ensure a unique solution
         A = A.tolil()
-        # Zero out the first row and set diagonal to 1
         A[0, :] = 0
         A[0, 0] = 1.0
-        # To maintain symmetry (optional for splu but good practice), zero the column too
-        # But we'd need to adjust the RHS. For splu, just zeroing the row is enough.
         
         return A.tocsc()
 
     def solve(self, u_star, v_star, dt):
-        """Solve the pressure Poisson equation and return p (Nx+2, Ny+2)."""
+        """Solve the pressure Poisson equation.
+
+        Parameters
+        ----------
+        u_star, v_star : ndarray
+            The intermediate velocity field.
+        dt : float
+            Time step.
+
+        Returns
+        -------
+        p : ndarray, shape (Nx+2, Ny+2)
+            The calculated pressure field including ghost cells.
+        """
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.dx, self.dy
 
-        # Compute divergence over active cells
+        # Compute divergence of intermediate velocity over active cells
         div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
-        rhs = (-div / dt).ravel(order="F")
+        
+        # RHS of Poisson eq: ∇²p = (∇·u*) / dt
+        rhs = (div / dt).ravel(order="F")
         
         # Pin pressure at first cell to 0
         rhs[0] = 0.0
@@ -79,10 +124,10 @@ class PressureSolver:
         # Populate interior physical cells
         p[1:-1, 1:-1] = p_flat.reshape((Nx, Ny), order="F")
 
-        # Normalize to zero mean
+        # Normalize to zero mean for consistency
         p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
 
-        # Enforce Neumann BCs on pressure ghost cells
+        # Enforce Neumann BCs on pressure ghost cells (zero gradient)
         p[0, :] = p[1, :]
         p[-1, :] = p[-2, :]
         p[:, 0] = p[:, 1]
