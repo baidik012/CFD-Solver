@@ -22,7 +22,7 @@ def main():
 
     defaults = {
         "geometry": {"Lx": 1.0, "Ly": 1.0, "Nx": 64, "Ny": 64},
-        "nu": 0.01, "dt": 0.001, "steps": 200,
+        "nu": 0.01, "dt": 0.001, "simulation_time": 20.0,
         "boundary": {"top": {"u": 1.0, "v": 0.0}, "other": {"u": 0.0, "v": 0.0}},
     }
 
@@ -48,7 +48,7 @@ def main():
         advection_scheme=cfg.get("advection_scheme", "upwind"),
         diffusion_scheme=cfg.get("diffusion_scheme", "crank_nicolson"),
     )
-    ok = solver.solve(cfg["steps"], verbose=True)
+    ok = solver.solve(simulation_time=cfg.get("simulation_time", 20.0), verbose=True)
     if not ok:
         raise SystemExit("Simulation blew up; not saving NaN output.")
 

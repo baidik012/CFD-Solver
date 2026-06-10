@@ -10,15 +10,16 @@ _SCHEMA = {
         "required": True,
         "type": dict,
         "fields": {
-            "Lx": {"type": (int, float), "min": 0, "exclusive_min": True},
-            "Ly": {"type": (int, float), "min": 0, "exclusive_min": True},
-            "Nx": {"type": int, "min": 2},
-            "Ny": {"type": int, "min": 2},
+            "Lx": {"type": (int, float), "min": 0, "exclusive_min": True, "required": True},
+            "Ly": {"type": (int, float), "min": 0, "exclusive_min": True, "required": True},
+            "Nx": {"type": int, "min": 2, "required": True},
+            "Ny": {"type": int, "min": 2, "required": True},
         },
     },
-    "nu": {"type": (int, float), "min": 0},
-    "dt": {"type": (int, float), "min": 0, "exclusive_min": True},
+    "nu": {"type": (int, float), "min": 0, "required": True},
+    "dt": {"type": (int, float), "min": 0, "exclusive_min": True, "required": True},
     "steps": {"type": int, "min": 1},
+    "simulation_time": {"type": (int, float), "min": 0, "exclusive_min": True},
     "boundary": {
         "type": dict,
         "fields": {
@@ -72,6 +73,11 @@ def validate_config(cfg):
             errors.append(f"Unknown field: {key}")
 
     _check_dict(cfg, _SCHEMA, "", errors)
+
+    # Either steps or simulation_time must be provided
+    if "steps" not in cfg and "simulation_time" not in cfg:
+        errors.append("Missing required field: either 'steps' or 'simulation_time' must be set")
+
     return errors
 
 
@@ -104,7 +110,9 @@ def _check_fields(data, schema, prefix, errors):
 
     for key, spec in schema["fields"].items():
         path = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
-        if key in data:
+        if spec.get("required") and key not in data:
+            errors.append(f"Missing required field: {path}")
+        elif key in data:
             _check_value(data[key], spec, path, errors)
 
 

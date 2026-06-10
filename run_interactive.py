@@ -102,12 +102,18 @@ def main():
     Ny = ask("Grid cells in y", 32)
     nu = ask("Viscosity (nu)", 0.01)
     dt = ask("Time step (dt)", 0.001)
-    steps = ask("Number of steps", 200)
     top_u = ask("Lid speed", 1.0)
     smooth_lid = input("  Use smooth lid profile? (y/n) [y]: ").strip().lower() != "n"
 
+    # Compute a sensible default simulation time based on flow parameters.
+    # Steady state roughly requires max(10, 0.1*Re) convective time units (L/U).
+    Re = abs(top_u) * 1.0 / max(nu, 1e-10)
+    t_conv = 1.0 / max(abs(top_u), 1e-10)
+    default_time = t_conv * min(max(10.0, 0.1 * Re), 200.0)
+    simulation_time = ask("Simulation time (seconds)", round(default_time, 1))
+
     print()
-    print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  steps={steps}  |  lid={top_u}  |  smooth={smooth_lid}")
+    print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  time={simulation_time}s  |  lid={top_u}  |  smooth={smooth_lid}")
     print()
 
     print("  Running solver...")
@@ -125,7 +131,7 @@ def main():
             grid_size=(Nx, Ny), nu=nu, dt=dt,
             lid_speed=top_u, smooth_lid=smooth_lid,
         )
-        ok = s.solve(steps, verbose=True)
+        ok = s.solve(simulation_time=simulation_time, verbose=True)
     except Exception as exc:
         _handle_error(exc)
 

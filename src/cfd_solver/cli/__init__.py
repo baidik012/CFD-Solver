@@ -129,11 +129,24 @@ def run(args):
             diffusion_scheme=diffusion_scheme,
         )
 
-    # Simulation loop
-    steps = cfg.get("steps", 200)
+    # Simulation loop — prefer simulation_time over steps
+    sim_time = cfg.get("simulation_time")
+    steps = cfg.get("steps")
+    if sim_time is None and steps is None:
+        # Auto-compute from flow parameters: max(10, 0.1*Re) convective time units
+        nu_val = cfg.get("nu", 0.01)
+        top_u = cfg.get("boundary", {}).get("top", {}).get("u", 1.0)
+        Re = abs(top_u) / max(nu_val, 1e-10)
+        t_conv = 1.0 / max(abs(top_u), 1e-10)
+        sim_time = t_conv * min(max(10.0, 0.1 * Re), 200.0)
+        print(f"  [info] No simulation_time or steps set. Auto-selecting {sim_time:.1f}s "
+              f"(Re={Re:.0f})", file=sys.stderr)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    ok = solver.solve(steps, verbose=True)
+    if sim_time is not None:
+        ok = solver.solve(simulation_time=sim_time, verbose=True)
+    else:
+        ok = solver.solve(steps, verbose=True)
 
     if not ok:
         print(

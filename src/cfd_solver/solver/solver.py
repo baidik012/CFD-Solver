@@ -277,15 +277,24 @@ class Solver:
         # Finalize BCs for the new velocity field
         self.bc.apply(self.u, self.v, Nx, Ny)
 
-    def solve(self, steps, verbose=True):
-        """Run the simulation for a fixed number of steps.
+    def solve(self, steps=None, verbose=True, simulation_time=None):
+        """Run the simulation.
+
+        Either ``steps`` or ``simulation_time`` must be provided.  When
+        ``simulation_time`` is given, the number of steps is computed
+        automatically as ``ceil(simulation_time / dt)`` and the ``steps``
+        argument is ignored.
 
         Parameters
         ----------
-        steps : int
-            Number of time steps to advance.
+        steps : int, optional
+            Number of time steps to advance.  Required if
+            ``simulation_time`` is not set.
         verbose : bool, optional
             If True, print a progress bar and diagnostics (default True).
+        simulation_time : float, optional
+            Physical time (in seconds) to simulate.  When set, overrides
+            ``steps``.
 
         Returns
         -------
@@ -293,6 +302,12 @@ class Solver:
             True if all steps completed, False if the simulation blew up
             (velocity field became NaN/Inf) and was aborted early.
         """
+        if simulation_time is not None:
+            if simulation_time <= 0:
+                raise ValueError(f"simulation_time must be positive, got {simulation_time}")
+            steps = int(np.ceil(simulation_time / self.dt))
+        if steps is None or steps <= 0:
+            raise ValueError("Provide either steps > 0 or simulation_time > 0")
         if steps > 1_000_000:
             print(f"  [warning] Requesting {steps:,} steps. This may take a long time.", file=sys.stderr)
         

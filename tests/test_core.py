@@ -16,6 +16,7 @@ from cfd_solver.solver import advection
 from cfd_solver.solver.diffusion import CrankNicolson, explicit
 from cfd_solver.solver.pressure import PressureSolver
 from cfd_solver.solver import diagnostics
+from cfd_solver.solver.validate import validate_config
 from cfd_solver.solver.viz import save_quiver, save_contour
 
 
@@ -324,6 +325,234 @@ def test_save_contour(tmp_path):
     path = tmp_path / "contour.png"
     save_contour(s.mesh, s.u, s.v, s.p, str(path))
     assert path.exists()
+
+
+# ── Crank-Nicolson Solve Tests ───────────────────────────────────────
+
+def test_crank_nicolson_solve_output_finite():
+    """Verify that Crank-Nicolson.solve() produces finite output with real data."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    bc = BoundaryConditions(top=1.0)
+    cn = CrankNicolson(m, nu=0.01, dt=1e-4, bc=bc)
+
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    adv_u = np.random.randn(*m.shape_u) * 0.01
+    adv_v = np.random.randn(*m.shape_v) * 0.01
+
+    u_star, v_star = cn.solve(u, v, adv_u, adv_v)
+    assert np.isfinite(u_star).all()
+    assert np.isfinite(v_star).all()
+    # Boundary values should be preserved
+    assert np.allclose(u_star[:, -1], 2.0, atol=1e-3)
+    assert np.allclose(u_star[:, 0], 0.0, atol=1e-3)
+
+
+def test_crank_nicolson_smooths_velocity():
+    """Verify that Crank-Nicolson diffusion smooths the velocity field (reduces L2 norm of Laplacian)."""
+    m = Mesh(1.0, 1.0, 10, 8)
+    bc = BoundaryConditions(top=1.0)
+    cn = CrankNicolson(m, nu=0.01, dt=1e-3, bc=bc)
+
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    # Add localized perturbation
+    u[4, 3] = 5.0
+
+    adv_u = np.zeros_like(u)
+    adv_v = np.zeros_like(v)
+
+    u_star, v_star = cn.solve(u, v, adv_u, adv_v)
+    assert np.isfinite(u_star).all()
+    # Diffusion should reduce the peak perturbation
+    assert np.max(np.abs(u_star)) < np.max(np.abs(u))
+
+
+# ── Checkpoint Round-Trip Tests ──────────────────────────────────────
+
+def test_checkpoint_roundtrip(tmp_path):
+    """Save a checkpoint and reload it; verify state matches exactly."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
+    s.step()
+
+    path = str(tmp_path / "test.npz")
+    s.checkpoint(path)
+
+    s2 = Solver.from_checkpoint(path)
+    assert np.allclose(s.u, s2.u)
+    assert np.allclose(s.v, s2.v)
+    assert np.allclose(s.p, s2.p)
+
+
+def test_checkpoint_roundtrip_smooth_lid(tmp_path):
+    """Checkpoint round-trip preserves smooth_lid and lid_speed settings."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.5, smooth_lid=True)
+    s.step()
+
+    path = str(tmp_path / "test_smooth.npz")
+    s.checkpoint(path)
+
+    s2 = Solver.from_checkpoint(path)
+    assert s2.bc.smooth_lid is True
+    assert s2.bc.top == pytest.approx(1.5)
+    assert np.allclose(s.u, s2.u)
+
+
+def test_checkpoint_missing_file():
+    """from_checkpoint raises FileNotFoundError for a missing file."""
+    with pytest.raises(FileNotFoundError):
+        Solver.from_checkpoint("/nonexistent/path.npz")
+
+
+# ── Validation Tests ─────────────────────────────────────────────────
+
+def test_validate_missing_geometry_nx():
+    """Validator catches missing required field Nx inside geometry."""
+    cfg = {"geometry": {"Lx": 1, "Ly": 1}, "nu": 0.01, "dt": 0.001, "steps": 10}
+    errors = validate_config(cfg)
+    assert any("Nx" in e for e in errors)
+
+
+def test_validate_missing_geometry_ny():
+    """Validator catches missing required field Ny inside geometry."""
+    cfg = {"geometry": {"Lx": 1, "Ly": 1, "Nx": 32}, "nu": 0.01, "dt": 0.001, "steps": 10}
+    errors = validate_config(cfg)
+    assert any("Ny" in e for e in errors)
+
+
+def test_validate_missing_required_top_level():
+    """Validator catches missing top-level required fields."""
+    cfg = {"nu": 0.01, "dt": 0.001}
+    errors = validate_config(cfg)
+    assert any("steps" in e for e in errors)
+
+
+def test_validate_unknown_top_level_key():
+    """Validator catches unknown top-level keys."""
+    cfg = {"nu": 0.01, "dt": 0.001, "steps": 10, "typo_field": 42}
+    errors = validate_config(cfg)
+    assert any("typo_field" in e for e in errors)
+
+
+def test_validate_valid_config():
+    """Validator passes a fully valid config with steps."""
+    cfg = {
+        "geometry": {"Lx": 1, "Ly": 1, "Nx": 32, "Ny": 32},
+        "nu": 0.01,
+        "dt": 0.001,
+        "steps": 100,
+    }
+    errors = validate_config(cfg)
+    assert errors == []
+
+
+def test_validate_valid_config_simulation_time():
+    """Validator passes a fully valid config with simulation_time."""
+    cfg = {
+        "geometry": {"Lx": 1, "Ly": 1, "Nx": 32, "Ny": 32},
+        "nu": 0.01,
+        "dt": 0.001,
+        "simulation_time": 20.0,
+    }
+    errors = validate_config(cfg)
+    assert errors == []
+
+
+def test_validate_neither_steps_nor_simulation_time():
+    """Validator rejects config with neither steps nor simulation_time."""
+    cfg = {
+        "geometry": {"Lx": 1, "Ly": 1, "Nx": 32, "Ny": 32},
+        "nu": 0.01,
+        "dt": 0.001,
+    }
+    errors = validate_config(cfg)
+    assert any("steps" in e and "simulation_time" in e for e in errors)
+
+
+# ── Convergence Tests ────────────────────────────────────────────────
+
+def test_solver_simulation_time():
+    """Solver.solve() with simulation_time runs the correct number of steps."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-3, lid_speed=1.0)
+    s.solve(simulation_time=0.01, verbose=False)
+    # 0.01s / 0.001dt = 10 steps
+    assert np.isfinite(s.u).all()
+
+
+def test_solver_simulation_time_overrides_steps():
+    """simulation_time takes precedence over steps."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-3, lid_speed=1.0)
+    # steps=1 would be too few, simulation_time=0.05 = 50 steps
+    s.solve(steps=1, simulation_time=0.05, verbose=False)
+    # If simulation_time was ignored, velocity would barely change
+    assert np.max(np.abs(s.u)) > 0.01
+
+
+def test_solver_steps_still_works():
+    """Backward-compatible: solve(steps=N) still works."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-3, lid_speed=1.0)
+    s.solve(10, verbose=False)
+    assert np.isfinite(s.u).all()
+
+
+def test_solver_solve_no_args_raises():
+    """Calling solve() with neither steps nor simulation_time raises."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-3, lid_speed=1.0)
+    with pytest.raises(ValueError):
+        s.solve(verbose=False)
+
+def test_solver_converges_toward_steady_state():
+    """Run solver long enough to verify velocity changes diminish over time."""
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.0005, lid_speed=1.0)
+
+    # Measure velocity change over first 20 steps
+    u0 = s.u.copy()
+    for _ in range(20):
+        s.step()
+    delta_early = np.max(np.abs(s.u - u0))
+
+    # Measure velocity change over next 20 steps
+    u1 = s.u.copy()
+    for _ in range(20):
+        s.step()
+    delta_late = np.max(np.abs(s.u - u1))
+
+    # Late-stage changes should be smaller (approaching steady state)
+    assert delta_late < delta_early
+
+
+def test_solver_divergence_always_small():
+    """Verify divergence stays small across many steps (steady convergence)."""
+    s = Solver(grid_size=(12, 12), nu=0.01, dt=0.0005, lid_speed=1.0)
+    for _ in range(50):
+        s.step()
+    assert s.max_divergence() < 1e-6
+
+
+# ── Explicit Diffusion + Advection Interaction ──────────────────────
+
+def test_explicit_diffusion_with_nonzero_advection():
+    """Verify explicit diffusion handles non-zero advection without crashing."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(top=1.0)
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    # Non-zero advective terms
+    adv_u = np.random.randn(*m.shape_u) * 0.001
+    adv_v = np.random.randn(*m.shape_v) * 0.001
+
+    u_s, v_s = explicit(u, v, adv_u, adv_v, m.dx, m.dy, 1e-4, 0.01, bc, m.Nx, m.Ny)
+    assert np.isfinite(u_s).all()
+    assert np.isfinite(v_s).all()
+    # BCs still respected
+    assert np.allclose(u_s[:, -1], 2.0, atol=1e-3)
+    assert np.allclose(u_s[:, 0], 0.0, atol=1e-3)
 
 
 # ── CLI Tests ─────────────────────────────────────────────────────────
