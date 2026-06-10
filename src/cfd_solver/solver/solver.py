@@ -67,7 +67,12 @@ class Solver:
         dx, dy = self.mesh.dx, self.mesh.dy
         dt_max = min(dx, dy) / max(lid_speed, 1e-10) * 0.1
         if dt > dt_max:
-            dt = dt_max
+            print(
+                f"  [safety] dt={dt} exceeds stability limit, "
+                f"auto-reduced to {dt_max:.4g}",
+                file=sys.stderr
+            )    
+            dt = dt_max 
 
         self.dt = dt
         self.nu = nu

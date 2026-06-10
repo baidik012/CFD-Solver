@@ -1,10 +1,5 @@
 import os
 import sys
-
-print("DEBUG CWD:", os.getcwd())
-print("DEBUG SCRIPT:", __file__)
-print("DEBUG FIRST LINE:", open(__file__, "r").readline().rstrip())
-
 import numpy as np
 
 # Allow running this script directly without installing the package
