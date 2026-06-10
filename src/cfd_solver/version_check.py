@@ -103,10 +103,11 @@ def check_for_updates(repo_dir=None):
         # Local is ahead of (or diverged from) origin/main; not "behind".
         return False
 
+    cmd = "update.bat" if sys.platform == "win32" else "./update.sh"
     plural = "commit" if behind == 1 else "commits"
     print(
         f"\n!  Update available: your copy is {behind} {plural} behind.\n"
-        f"   Run  git pull  in {cwd}  to get the latest changes.\n"
+        f"   Run  {cmd}  from the repository root to get the latest changes.\n"
         f"   (Set CFD_SOLVER_NO_UPDATE_CHECK=1 to disable this check.)\n",
         file=sys.stderr,
     )

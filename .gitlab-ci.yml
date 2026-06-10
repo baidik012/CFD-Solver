@@ -17,7 +17,8 @@ test:
   stage: test
   image: python:3.11-slim
   variables:
-    # The package is not installable yet (no pyproject.toml); import from src.
+    # Import from src directly: avoids needing git inside the slim image
+    # for setuptools-scm version resolution during `pip install -e .`.
     PYTHONPATH: "src"
     # Headless matplotlib backend for the viz tests
     MPLBACKEND: "Agg"
