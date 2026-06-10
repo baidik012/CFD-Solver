@@ -226,10 +226,13 @@ class CrankNicolson:
         # RHS = u + dt*(-advection + 0.5*nu*lap_u)
         rhs_u = u[1:-1, 1:-1] - dt * adv_u[1:-1, 1:-1] + 0.5 * dt * nu * lap_u
 
-        # Add boundary contributions for the implicit part
-        # x-direction Dirichlet
-        rhs_u[0, :] += rx * self.bc.left
-        rhs_u[-1, :] += rx * self.bc.right
+        # Add boundary contributions for the implicit part.
+        # x-direction Dirichlet: the unknowns adjacent to the side walls
+        # couple to u at the wall faces (i=0, i=Nx), which is the wall-NORMAL
+        # velocity and is exactly 0 for an impermeable cavity (bc.apply sets
+        # those faces to 0). NOTE: bc.left / bc.right are the TANGENTIAL
+        # v-velocities on those walls and belong to the v-equation only, so
+        # the u-RHS receives no contribution here.
         
         # y-direction (via ghost cells)
         rhs_u[:, 0] += 2.0 * ry * self.bc.bottom
