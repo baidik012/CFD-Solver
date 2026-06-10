@@ -112,8 +112,13 @@ class PressureSolver:
         # Compute divergence of intermediate velocity over active cells
         div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
         
-        # RHS of Poisson eq: ∇²p = (∇·u*) / dt
-        rhs = (div / dt).ravel(order="F")
+        # RHS of Poisson eq: ∇²p = (∇·u*) / dt.
+        # The assembled operator A has a positive diagonal / negative
+        # off-diagonals, i.e. A = -∇² (positive-definite form). Solving
+        # A·p = rhs therefore yields -∇²p = rhs. To recover ∇²p = (∇·u*)/dt
+        # we must negate the RHS, otherwise the projection ADDS divergence
+        # instead of removing it and the simulation blows up.
+        rhs = (-div / dt).ravel(order="F")
         
         # Pin pressure at first cell to 0
         rhs[0] = 0.0
