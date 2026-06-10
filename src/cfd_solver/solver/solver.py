@@ -41,7 +41,6 @@ from . import advection
 from .diffusion import CrankNicolson
 from .pressure import PressureSolver
 from .diagnostics import (
-    divergence as _divergence,
     divergence_norm,
     max_divergence,
     cfl,
@@ -161,6 +160,20 @@ class Solver:
                 f"and diffusion stability. "
                 f"Suggested dt <= {dt_max:.4g}. Use force=True to override."
             )
+        # Cell Peclet check: central differencing has no numerical dissipation
+        # and produces grid-scale oscillations ("wiggles") when the cell Peclet
+        # number Pe = |u|*dx/nu exceeds 2. This is independent of the CFL/diffusion
+        # time-step limits above, so warn explicitly here.
+        if advection_scheme == "central" and nu > 1e-10:
+            cell_peclet = expected_max_speed * dx_min / nu
+            if cell_peclet > 2.0 and not force:
+                print(
+                    f"  [warning] Central advection with cell Peclet number "
+                    f"{cell_peclet:.1f} > 2 may produce grid-scale oscillations. "
+                    f"Use advection_scheme='upwind', refine the grid, or increase nu.",
+                    file=sys.stderr,
+                )
+
         self.dt = dt
         self.nu = nu
         self.advection_scheme = advection_scheme
