@@ -135,12 +135,30 @@ class Solver:
         self.mesh = Mesh(Lx, Ly, Nx, Ny)
         self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
 
-        # Stability check: CFL should be small (ideally < 0.5, here we're conservative)
+        # Stability check: CFL and diffusion constraints.
+        # IMPORTANT: Flow velocities can reach 2-3x the lid speed due to recirculation.
+        # We use a conservative limit to prevent blowup.
         dx, dy = self.mesh.dx, self.mesh.dy
-        dt_max = min(dx, dy) / max(lid_speed, 1e-10) * 0.1
+        dx_min = min(dx, dy)
+        
+        # Advection stability: CFL = (|u|*dt/dx) + (|v|*dt/dy) < 1
+        # Conservatively assume max speed reaches 3x lid_speed during simulation
+        expected_max_speed = 3.0 * max(abs(lid_speed), 1e-10)
+        dt_advection = 0.5 * dx_min / expected_max_speed
+        
+        # Diffusion stability (mainly for explicit schemes): dt < dx²/(4*nu)
+        if nu > 1e-10:
+            dt_diffusion = 0.25 * dx_min**2 / nu
+        else:
+            dt_diffusion = float('inf')
+        
+        dt_max = min(dt_advection, dt_diffusion)
+        
         if dt > dt_max and not force:
             raise ValueError(
                 f"dt={dt} exceeds the numerical stability limit ({dt_max:.4g}). "
+                f"This limit accounts for advection (CFL < 0.5, assuming peak speed ~{expected_max_speed:.3f}) "
+                f"and diffusion stability. "
                 f"Suggested dt <= {dt_max:.4g}. Use force=True to override."
             )
         self.dt = dt
@@ -267,12 +285,17 @@ class Solver:
             if is_blowup(self.u, self.v):
                 if verbose:
                     c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
-                    safe_dt = self.dt / max(c, 1.0) * 0.8
+                    # If CFL is inf, the field has NaN/Inf; suggest much smaller dt
+                    if c == np.inf:
+                        safe_dt = self.dt * 0.1
+                    else:
+                        safe_dt = self.dt / max(c, 1.0) * 0.5
+                    cfl_str = f"{c:.2e}" if c != np.inf else "Inf"
                     print(
-                        f"\nStep {i:4d}: BLOWUP — velocity is NaN/Inf."
-                        f"  CFL at last step: {c:.2f}\n"
-                        f"  Try: dt <= {safe_dt:.4g}  (currently {self.dt}),"
-                        f" smaller lid_speed, or smooth_lid=True."
+                        f"\nStep {i:4d}: BLOWUP — velocity is NaN/Inf. "
+                        f"CFL at last step: {cfl_str}\n"
+                        f"  Try: dt <= {safe_dt:.4g}  (currently {self.dt}), "
+                        f"smaller lid_speed, or smooth_lid=True."
                     )
                 return
 
@@ -285,9 +308,11 @@ class Solver:
                 eta = (steps - i - 1) / rate if rate > 0 else 0
                 div = max_divergence(self.u, self.v, self.dx, self.dy)
                 c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                # Handle inf CFL gracefully in display
+                cfl_str = f"{c:.3f}" if c != np.inf else "Inf"
                 sys.stdout.write(
                     f"\r  [{bar}] {i+1:4d}/{steps}  "
-                    f"|div|={div:.2e}  CFL={c:.3f}  "
+                    f"|div|={div:.2e}  CFL={cfl_str}  "
                     f"ETA={eta:.0f}s"
                 )
                 sys.stdout.flush()
