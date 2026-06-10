@@ -111,8 +111,16 @@ def run(args):
     steps = cfg.get("steps", 200)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    solver.solve(steps, verbose=True)
-    
+    ok = solver.solve(steps, verbose=True)
+
+    if not ok:
+        print(
+            "\nSimulation aborted due to blowup. Skipping plot and checkpoint "
+            "to avoid writing NaN/Inf data.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     # Save results and checkpoint
     save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
     solver.checkpoint(args.output.rsplit(".", 1)[0] + ".npz")

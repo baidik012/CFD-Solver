@@ -286,6 +286,12 @@ class Solver:
             Number of time steps to advance.
         verbose : bool, optional
             If True, print a progress bar and diagnostics (default True).
+
+        Returns
+        -------
+        bool
+            True if all steps completed, False if the simulation blew up
+            (velocity field became NaN/Inf) and was aborted early.
         """
         if steps > 1_000_000:
             print(f"  [warning] Requesting {steps:,} steps. This may take a long time.", file=sys.stderr)
@@ -310,7 +316,7 @@ class Solver:
                         f"  Try: dt <= {safe_dt:.4g}  (currently {self.dt}), "
                         f"smaller lid_speed, or smooth_lid=True."
                     )
-                return
+                return False
 
             if verbose:
                 bar_len = 30
@@ -333,6 +339,7 @@ class Solver:
         if verbose:
             elapsed = time.time() - t0
             sys.stdout.write(f"\n  Done in {elapsed:.1f}s\n")
+        return True
 
     def divergence_norm(self):
         """Calculate the RMS divergence of the current velocity field."""
