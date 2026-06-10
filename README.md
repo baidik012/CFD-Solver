@@ -86,7 +86,7 @@ CFD-Solver/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Ready-to-run simulations
 ├── output/                      # Results and plots
-├── tests/                       # Unit tests (26 tests)
+├── tests/                       # Unit tests (46 tests)
 ├── run_interactive.py           # Interactive parameter setup
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
@@ -105,19 +105,17 @@ CFD-Solver/
 
 **Original development machine:** Intel Core i7-13620H (10 cores, up to 5.0 GHz), 16 GB RAM, Linux.
 
-**Expected performance (200 time steps):**
+**Expected performance (20 seconds simulated time, Re=100):**
 
 | Grid | Time |
 |------|------|
-| 32×32 | 0.07 s |
-| 64×64 | 0.22 s |
-| 128×128 | 1.1 s |
-| 256×256 | 5.0 s |
-| 1024×1024 | ~170 s |
+| 32×32 | 0.1 s |
+| 64×64 | 0.2 s |
+| 128×128 | 1.0 s |
+| 256×256 | 10.5 s |
+| 512×512 | 28.3 s |
 
-Larger grids are memory-bound — a 256×256 grid uses ~256 MB for the pressure matrix. Anything above 512×512 will need significant RAM and time.
-
-The solver auto-scales `dt` to keep the simulation stable at fine grids. You can pass any `dt` value and the solver will reduce it if needed.
+The solver auto-scales `dt` to keep the simulation stable at fine grids. Smaller viscosity (higher Re) produces smaller `dt` values, increasing wall time. The default `simulation_time` adapts to your flow parameters automatically.
 
 ---
 
@@ -135,7 +133,7 @@ Or download a versioned zip from [Releases](https://github.com/baidik012/CFD-Sol
 - **Windows** — double-click `run.bat`
 - **Mac/Linux** — run `./run.sh`
 
-That's it. On first run, the script automatically creates a virtual environment and installs all dependencies. You'll be asked for simulation parameters (grid size, viscosity, time steps, etc.) with sensible defaults. Just press Enter to accept the defaults. The solver runs and opens the result image automatically.
+That's it. On first run, the script automatically creates a virtual environment and installs all dependencies. You'll be asked for simulation parameters (grid size, viscosity, simulation time, etc.) with sensible defaults. Just press Enter to accept the defaults. The solver runs and opens the result image automatically.
 
 No code editing, YAML files, or separate setup step needed.
 
