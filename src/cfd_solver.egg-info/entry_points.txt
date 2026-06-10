@@ -1,2 +1,0 @@
-[console_scripts]
-cfd = cfd_solver.cli:main
