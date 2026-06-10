@@ -54,6 +54,7 @@ class BoundaryConditions:
         self.smooth_lid = smooth_lid
 
         self._lid_profile = None
+        self._lid_profile_key = None
 
     def _get_lid_profile(self, Nx: int):
         """Return the sinusoidal lid profile array.
@@ -68,8 +69,10 @@ class BoundaryConditions:
         ndarray
             Sinusoidal velocity profile of length Nx+1.
         """
-        if self._lid_profile is None or len(self._lid_profile) != Nx + 1:
+        key = (Nx, self.top)
+        if self._lid_profile is None or self._lid_profile_key != key:
             self._lid_profile = self.top * np.sin(np.pi * np.arange(Nx + 1) / Nx)
+            self._lid_profile_key = key
         return self._lid_profile
 
     def apply(self, u, v, Nx: int, Ny: int):
