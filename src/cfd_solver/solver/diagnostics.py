@@ -70,16 +70,25 @@ def cfl(u, v, dx, dy, dt):
 
     The CFL number is a measure of how much information travels across a
     grid cell in a single time step:
-        CFL = (|u|*dt/dx) + (|v|*dt/dy)
-    For numerical stability, especially in explicit schemes, the CFL number
+        CFL = max(|u|*dt/dx + |v|*dt/dy)
+    For numerical stability in explicit schemes, the CFL number
     should typically be less than 1.0.
+    
+    If the velocity field contains NaN or Inf (indicating blowup),
+    this function returns np.inf.
 
     Returns
     -------
     float
-        The maximum CFL number in the domain.
+        The maximum CFL number in the domain, or np.inf if blowup detected.
     """
-    return np.max(np.abs(u[:, 1:-1])) * dt / dx + np.max(np.abs(v[1:-1, :])) * dt / dy
+    # Check for blowup (NaN/Inf) before computing max
+    if not (np.all(np.isfinite(u)) and np.all(np.isfinite(v))):
+        return np.inf
+    
+    u_max = np.max(np.abs(u[:, 1:-1]))
+    v_max = np.max(np.abs(v[1:-1, :]))
+    return u_max * dt / dx + v_max * dt / dy
 
 
 def is_blowup(u, v):
