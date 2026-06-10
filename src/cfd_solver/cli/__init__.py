@@ -44,11 +44,12 @@ def _handle_error(exc):
     print("  ERROR", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
 
-    msg = _FRIENDLY_ERRORS.get(type(exc))
-    if msg:
-        print(f"  {msg}", file=sys.stderr)
-    else:
-        print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+    # Always show the real error first: solver errors carry actionable
+    # guidance (e.g. suggested dt limits) that must not be hidden.
+    print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+    hint = _FRIENDLY_ERRORS.get(type(exc))
+    if hint:
+        print(f"\n  Hint: {hint}", file=sys.stderr)
 
     print("=" * 50 + "\n", file=sys.stderr)
     raise SystemExit(1)
