@@ -1,0 +1,27 @@
+# GitLab CI - runs the test suite on merge requests and branch pushes.
+#
+# Note: .github/workflows/release.yml is a GitHub Actions workflow and does
+# NOT run on GitLab. This file provides the actual CI for this repository.
+
+workflow:
+  rules:
+    # Run merge request pipelines
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Avoid duplicate pipelines for branches that have an open MR
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    # Run branch pipelines (including main)
+    - if: $CI_COMMIT_BRANCH
+
+test:
+  stage: test
+  image: python:3.11-slim
+  variables:
+    # The package is not installable yet (no pyproject.toml); import from src.
+    PYTHONPATH: "src"
+    # Headless matplotlib backend for the viz tests
+    MPLBACKEND: "Agg"
+  before_script:
+    - pip install --quiet numpy scipy matplotlib pyyaml pytest
+  script:
+    - pytest tests/ -v
