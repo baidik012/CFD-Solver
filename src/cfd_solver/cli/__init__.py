@@ -44,11 +44,12 @@ def _handle_error(exc):
     print("  ERROR", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
 
-    msg = _FRIENDLY_ERRORS.get(type(exc))
-    if msg:
-        print(f"  {msg}", file=sys.stderr)
-    else:
-        print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+    # Always show the real error first: solver errors carry actionable
+    # guidance (e.g. suggested dt limits) that must not be hidden.
+    print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+    hint = _FRIENDLY_ERRORS.get(type(exc))
+    if hint:
+        print(f"\n  Hint: {hint}", file=sys.stderr)
 
     print("=" * 50 + "\n", file=sys.stderr)
     raise SystemExit(1)
@@ -99,19 +100,49 @@ def run(args):
         top = bc_cfg.get("top", {})
         top_u = top.get("u", 1.0)
         smooth = bc_cfg.get("smooth_lid", True)
+        advection_scheme = cfg.get("advection_scheme", "upwind")
+        diffusion_scheme = cfg.get("diffusion_scheme", "crank_nicolson")
+
+        # Warn about validated-but-unsupported fields rather than silently
+        # ignoring them, so configs are never silently misinterpreted.
+        ignored = []
+        if top.get("v") not in (None, 0, 0.0):
+            ignored.append("boundary.top.v")
+        other = bc_cfg.get("other", {})
+        if any(other.get(k) not in (None, 0, 0.0) for k in ("u", "v")):
+            ignored.append("boundary.other")
+        for key in ("cg_maxiter", "cg_rtol"):
+            if key in cfg:
+                ignored.append(key)
+        if ignored:
+            print(
+                f"  [warning] Config fields not supported by the solver and "
+                f"ignored: {', '.join(ignored)}",
+                file=sys.stderr,
+            )
 
         # Initialize the solver
         solver = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt, lid_speed=top_u,
             smooth_lid=smooth, Lx=Lx, Ly=Ly,
+            advection_scheme=advection_scheme,
+            diffusion_scheme=diffusion_scheme,
         )
 
     # Simulation loop
     steps = cfg.get("steps", 200)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
-    solver.solve(steps, verbose=True)
-    
+    ok = solver.solve(steps, verbose=True)
+
+    if not ok:
+        print(
+            "\nSimulation aborted due to blowup. Skipping plot and checkpoint "
+            "to avoid writing NaN/Inf data.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     # Save results and checkpoint
     save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
     solver.checkpoint(args.output.rsplit(".", 1)[0] + ".npz")

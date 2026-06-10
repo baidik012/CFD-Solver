@@ -125,9 +125,15 @@ def main():
             grid_size=(Nx, Ny), nu=nu, dt=dt,
             lid_speed=top_u, smooth_lid=smooth_lid,
         )
-        s.solve(steps, verbose=True)
+        ok = s.solve(steps, verbose=True)
     except Exception as exc:
         _handle_error(exc)
+
+    if not ok:
+        print()
+        print("  Simulation aborted due to blowup; not saving NaN output.")
+        print("  Reduce dt (or lid speed), then try again.")
+        raise SystemExit(1)
 
     # Prepare output directory
     project_root = os.path.dirname(os.path.abspath(__file__))

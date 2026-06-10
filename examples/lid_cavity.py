@@ -45,8 +45,12 @@ def main():
         nu=cfg["nu"], dt=cfg["dt"],
         lid_speed=top_u, smooth_lid=smooth,
         Lx=geo["Lx"], Ly=geo["Ly"],
+        advection_scheme=cfg.get("advection_scheme", "upwind"),
+        diffusion_scheme=cfg.get("diffusion_scheme", "crank_nicolson"),
     )
-    solver.solve(cfg["steps"], verbose=True)
+    ok = solver.solve(cfg["steps"], verbose=True)
+    if not ok:
+        raise SystemExit("Simulation blew up; not saving NaN output.")
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)

@@ -16,7 +16,7 @@ _SCHEMA = {
             "Ny": {"type": int, "min": 2},
         },
     },
-    "nu": {"type": (int, float), "min": 0, "exclusive_min": True},
+    "nu": {"type": (int, float), "min": 0},
     "dt": {"type": (int, float), "min": 0, "exclusive_min": True},
     "steps": {"type": int, "min": 1},
     "boundary": {
@@ -63,6 +63,14 @@ def validate_config(cfg):
         return ["Config must be a YAML mapping (key: value pairs)."]
 
     errors = []
+
+    # Flag unknown top-level keys (e.g. the typo 'step' instead of 'steps'),
+    # which previously passed validation silently.
+    known = set(_SCHEMA.keys())
+    for key in cfg:
+        if key not in known:
+            errors.append(f"Unknown field: {key}")
+
     _check_dict(cfg, _SCHEMA, "", errors)
     return errors
 

@@ -273,6 +273,39 @@ def test_full_grid_divergence_matches_interior():
     assert abs(full - interior) < 1e-4
 
 
+# ── Pressure Projection Regression Tests ──────────────────────
+
+def test_projection_removes_divergence():
+    """Regression test for the pressure-Poisson RHS sign error.
+
+    The projection step must REMOVE divergence from the intermediate
+    velocity. Under the historical sign bug (rhs = +div/dt against the
+    positive-definite operator A = -laplacian), the correction DOUBLED
+    the divergence every step, blowing up within ~23 steps.
+    """
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.0005, lid_speed=1.0)
+    for _ in range(3):
+        s.step()
+    # After projection the field must be near divergence-free everywhere.
+    assert s.max_divergence() < 1e-6
+
+
+def test_lid_cavity_32_no_blowup():
+    """Regression test for the reported blowup (32x32, dt=0.001, step ~23).
+
+    Runs past the historical failure point and asserts the field stays
+    finite with small divergence.
+    """
+    s = Solver(grid_size=(32, 32), nu=0.01, dt=0.001, lid_speed=1.0,
+               smooth_lid=True)
+    for _ in range(40):
+        s.step()
+    assert not diagnostics.is_blowup(s.u, s.v)
+    assert s.max_divergence() < 1e-6
+    # Velocities should remain physically plausible (|u| of order lid speed)
+    assert np.max(np.abs(s.u)) < 5.0
+
+
 # ── Visualization Tests ───────────────────────────────────────────────
 
 def test_save_quiver(tmp_path):
