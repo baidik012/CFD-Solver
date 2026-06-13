@@ -1,49 +1,36 @@
 # Contributing
 
+Small club, small repo. Here's how we work.
+
 ## Making Changes
 
-1. **Branch first.** Don't push straight to `main`.
-   ```bash
-   git checkout -b feature/what-youre-fixing
-   ```
+Branch first, always.
+```bash
+git checkout -b feature/what-youre-fixing
+```
 
-2. **Write the code.** Keep it readable. If something isn't obvious, add a comment.
-
-3. **Run the tests before opening a PR:**
-   ```bash
-   pip install -e ".[dev]"
-   pytest tests/
-   ```
-
-4. **Commit with a clear message** — what changed and why.
-   ```bash
-   git commit -m "Add channel flow boundary conditions"
-   ```
-
-5. **Push and open a PR.**
-   ```bash
-   git push origin feature/what-youre-fixing
-   ```
+Write your code, test it, commit it with a message that actually describes what you did, then open a PR.
+```bash
+pip install -e ".[dev]"
+pytest tests/
+git commit -m "Add sinusoidal lid profile to reduce corner singularities"
+git push origin feature/what-youre-fixing
+```
 
 ## Code Style
 
-- PEP 8. If your linter complains, fix it.
-- Use meaningful names. `velocity` beats `v`. `pressure_poisson_rhs` beats `pr`.
-- No magic numbers. If `0.5` shows up in three places, give it a name.
+PEP 8. Meaningful names. No magic numbers. If it needs explaining, add a comment.
 
-## What to Put in a PR
+## PRs
 
-- What changed and why
-- Link to related issues if any
-- A plot or screenshot if you touched visualization
-- How you tested it
+Say what changed and why. If you touched the visualization, include a plot. If you're not sure if something's ready, open a draft PR and ask.
 
-## What We Don't Want
+## Don't
 
-- `.png`, `.mp4`, or big `.log` files — those go in `output/`, not the repo
-- Commented-out code that "might be useful later"
-- PRs that touch 15 unrelated things at once
+- Commit `.png`, `.mp4`, or log files — those go in `output/`
+- Leave commented-out code in
+- Touch fifteen things in one PR
 
 ## Questions?
 
-Open an issue. Small club, someone will get back to you.
+Open an issue or ask in the group chat.
