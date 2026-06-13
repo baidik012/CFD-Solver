@@ -17,11 +17,12 @@ CFD-Solver/
 │   │   ├── validate.py         # YAML config schema validation
 │   │   ├── solver.py           # Public API (Chorin step & Solver class)
 │   │   └── viz.py              # Visualization (quiver + contour)
+│   ├── utils.py                # Shared error handling utilities
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Example scripts and configs
 ├── output/                      # Solver output images
-├── tests/                       # Unit tests (26 tests)
+├── tests/                       # Unit tests (57 tests)
 ├── run_interactive.py           # Interactive parameter prompts
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
@@ -45,6 +46,7 @@ The solver is split into focused modules with clear responsibilities:
 | `validate.py` | YAML config schema validation |
 | `solver.py` | Public API: Chorin step, `Solver` class, checkpoint/resume |
 | `viz.py` | Unified visualization (quiver + contour) |
+| `utils.py` | Shared error handling for CLI and interactive launcher |
 
 ## Core Concepts
 
@@ -247,4 +249,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-All 26 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, and the full Solver API.
+All 57 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, and the full Solver API.

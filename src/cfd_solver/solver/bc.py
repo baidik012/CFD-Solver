@@ -107,19 +107,6 @@ class BoundaryConditions:
         v[0, :] = 2.0 * self.left - v[1, :]
         v[-1, :] = 2.0 * self.right - v[-2, :]
 
-    def apply_pressure(self, p):
-        """Set pressure ghost cells using Neumann BC (zero gradient).
-
-        Parameters
-        ----------
-        p : ndarray, shape (Nx+2, Ny+2)
-            Pressure array including ghost cells.
-        """
-        p[0, :] = p[1, :]    # left wall
-        p[-1, :] = p[-2, :]  # right wall
-        p[:, 0] = p[:, 1]    # bottom wall
-        p[:, -1] = p[:, -2]  # top wall
-
     def lid_values(self, Nx: int):
         """Return the tangential lid u-values at face positions.
 

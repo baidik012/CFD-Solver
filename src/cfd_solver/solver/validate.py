@@ -42,8 +42,6 @@ _SCHEMA = {
     },
     "advection_scheme": {"type": str, "values": ["upwind", "central"]},
     "diffusion_scheme": {"type": str, "values": ["crank_nicolson", "explicit"]},
-    "cg_maxiter": {"type": int, "min": 1},
-    "cg_rtol": {"type": (int, float), "min": 0, "exclusive_min": True},
 }
 
 

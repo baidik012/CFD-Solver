@@ -51,10 +51,6 @@ class PressureSolver:
     ----------
     mesh : Mesh
         The computational mesh.
-    cg_maxiter : int, optional
-        Maximum iterations for the iterative solver (if used).
-    cg_rtol : float, optional
-        Relative tolerance for the iterative solver (if used).
 
     Attributes
     ----------
@@ -62,7 +58,7 @@ class PressureSolver:
         The discrete Laplacian operator.
     """
 
-    def __init__(self, mesh, cg_maxiter=1000, cg_rtol=1e-10):
+    def __init__(self, mesh):
         self.Nx = mesh.Nx
         self.Ny = mesh.Ny
         self.dx = mesh.dx

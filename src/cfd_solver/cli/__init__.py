@@ -13,46 +13,7 @@ import yaml
 from cfd_solver.solver import Solver
 from cfd_solver.solver.validate import validate_config
 from cfd_solver.solver.viz import save_contour, save_quiver
-
-
-_FRIENDLY_ERRORS = {
-    ModuleNotFoundError: (
-        "Missing required package. Run:\n"
-        "  pip install -r requirements.txt\n"
-        "or:\n"
-        "  pip install -e ."
-    ),
-    FileNotFoundError: "File not found. Check that the path is correct.",
-    PermissionError: "Permission denied. Check file/folder permissions.",
-    yaml.YAMLError: "Config file is invalid YAML. Check the syntax.",
-    KeyError: "Config file is missing a required field. Check the YAML keys.",
-    ValueError: "Invalid parameter value in config file.",
-    MemoryError: "Not enough memory. Try a smaller grid size.",
-}
-
-
-def _handle_error(exc):
-    """
-    Print a user-friendly message and exit.
-
-    Parameters
-    ----------
-    exc : Exception
-        The exception that was raised.
-    """
-    print("\n" + "=" * 50, file=sys.stderr)
-    print("  ERROR", file=sys.stderr)
-    print("=" * 50, file=sys.stderr)
-
-    # Always show the real error first: solver errors carry actionable
-    # guidance (e.g. suggested dt limits) that must not be hidden.
-    print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
-    hint = _FRIENDLY_ERRORS.get(type(exc))
-    if hint:
-        print(f"\n  Hint: {hint}", file=sys.stderr)
-
-    print("=" * 50 + "\n", file=sys.stderr)
-    raise SystemExit(1)
+from cfd_solver.utils import handle_error
 
 
 def run(args):
@@ -111,9 +72,6 @@ def run(args):
         other = bc_cfg.get("other", {})
         if any(other.get(k) not in (None, 0, 0.0) for k in ("u", "v")):
             ignored.append("boundary.other")
-        for key in ("cg_maxiter", "cg_rtol"):
-            if key in cfg:
-                ignored.append(key)
         if ignored:
             print(
                 f"  [warning] Config fields not supported by the solver and "
@@ -196,7 +154,7 @@ def main():
     except SystemExit:
         raise
     except Exception as exc:
-        _handle_error(exc)
+        handle_error(exc)
 
 
 if __name__ == "__main__":

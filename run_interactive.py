@@ -12,39 +12,7 @@ import subprocess
 
 import yaml
 
-
-_FRIENDLY_ERRORS = {
-    ModuleNotFoundError: (
-        "Missing required package. Run:\n"
-        "  pip install -r requirements.txt\n"
-        "or:\n"
-        "  pip install -e ."
-    ),
-    MemoryError: "Not enough memory. Try a smaller grid size.",
-}
-
-
-def _handle_error(exc):
-    """
-    Print a user-friendly message and exit.
-
-    Parameters
-    ----------
-    exc : Exception
-        The exception that was raised.
-    """
-    print("\n" + "=" * 50)
-    print("  ERROR")
-    print("=" * 50)
-
-    msg = _FRIENDLY_ERRORS.get(type(exc))
-    if msg:
-        print(f"  {msg}")
-    else:
-        print(f"  {type(exc).__name__}: {exc}")
-
-    print("=" * 50 + "\n")
-    raise SystemExit(1)
+from cfd_solver.utils import handle_error
 
 
 def ask(prompt, default):
@@ -123,7 +91,7 @@ def main():
         from cfd_solver.solver import Solver
         from cfd_solver.solver.viz import save_contour
     except ModuleNotFoundError as exc:
-        _handle_error(exc)
+        handle_error(exc)
 
     try:
         # Initialize and run the solver
@@ -133,7 +101,7 @@ def main():
         )
         ok = s.solve(simulation_time=simulation_time, verbose=True)
     except Exception as exc:
-        _handle_error(exc)
+        handle_error(exc)
 
     if not ok:
         print()

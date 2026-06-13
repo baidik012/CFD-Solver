@@ -98,10 +98,6 @@ class CrankNicolson:
         Time step.
     bc : BoundaryConditions
         Object to enforce boundary values.
-    cg_maxiter : int, optional
-        Maximum iterations for the iterative solver (if used).
-    cg_rtol : float, optional
-        Relative tolerance for the iterative solver (if used).
 
     Attributes
     ----------
@@ -109,7 +105,7 @@ class CrankNicolson:
         The implicit operators for u and v velocities.
     """
 
-    def __init__(self, mesh, nu, dt, bc, cg_maxiter=1000, cg_rtol=1e-5):
+    def __init__(self, mesh, nu, dt, bc):
         self.nu = nu
         self.dt = dt
         self.bc = bc
@@ -117,8 +113,6 @@ class CrankNicolson:
         self.Ny = mesh.Ny
         self.dx = mesh.dx
         self.dy = mesh.dy
-        self.cg_maxiter = cg_maxiter
-        self.cg_rtol = cg_rtol
 
         # Build and pre-factorize the matrices once to speed up the solve() calls
         self.A_u = self._build_u_matrix().tocsc()

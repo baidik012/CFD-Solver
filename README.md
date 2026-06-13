@@ -82,6 +82,7 @@ CFD-Solver/
 │   │   ├── validate.py         # YAML config schema validation
 │   │   ├── solver.py           # Public API (Chorin step & Solver class)
 │   │   └── viz.py              # Visualization (quiver + contour)
+│   ├── utils.py                # Shared error handling utilities
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Ready-to-run simulations
