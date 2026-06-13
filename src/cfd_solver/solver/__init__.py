@@ -8,7 +8,7 @@ from .diffusion import CrankNicolson, explicit
 from .pressure import PressureSolver
 from .validate import validate_config
 from . import diagnostics
-from .viz import save_quiver, save_contour
+from .viz import save_quiver, save_contour, save_streamlines
 
 __all__ = [
     "Mesh",
@@ -22,4 +22,5 @@ __all__ = [
     "diagnostics",
     "save_quiver",
     "save_contour",
+    "save_streamlines",
 ]

@@ -1,15 +1,19 @@
 """Visualization utilities for staggered incompressible flow.
 
-Provides two main functions:
+Provides three main functions:
   - save_quiver: velocity vector plot
   - save_contour: pressure + velocity magnitude side-by-side
+  - save_streamlines: pressure + velocity streamlines side-by-side
 
 Both accept a Mesh and the velocity/pressure arrays directly.
 """
 
 import os
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 
 def _default_skip(Nx, Ny):
@@ -110,3 +114,64 @@ def save_contour(mesh, u, v, p, path, skip=None, scale=None):
     plt.savefig(path)
     plt.close()
     print(f"Saved {path}")
+
+
+def save_streamlines(mesh, u, v, p, path, density=2.0):
+    """Save pressure contours and velocity streamlines side-by-side.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    u : ndarray, shape (Nx+1, Ny+2)
+    v : ndarray, shape (Nx+2, Ny+1)
+    p : ndarray, shape (Nx+2, Ny+2)
+    path : str
+        Output file path.
+    density : float, optional
+        Matplotlib streamplot density parameter.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    X, Y = mesh.cell_center_grid()
+    u_c, v_c = _interpolate_to_centers(u, v)
+    speed = np.sqrt(u_c**2 + v_c**2)
+    log_speed = np.log10(speed + 1e-6)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # Pressure
+    cf = axes[0].contourf(X, Y, p[1:-1, 1:-1], levels=100, cmap="RdBu_r")
+    axes[0].set_xlabel("x")
+    axes[0].set_ylabel("y")
+    axes[0].set_title("Pressure")
+    axes[0].set_aspect("equal")
+    plt.colorbar(cf, ax=axes[0], label="p")
+
+    # Velocity streamlines
+    vmin = -6
+    vmax = int(np.ceil(np.max(log_speed)))
+    vmax = max(0, vmax)
+
+    st = axes[1].streamplot(
+        mesh.xc, mesh.yc, u_c.T, v_c.T,
+        color=log_speed.T, cmap="viridis",
+        density=density, norm=mcolors.Normalize(vmin, vmax)
+    )
+
+    axes[1].set_xlabel("x")
+    axes[1].set_ylabel("y")
+    axes[1].set_title("Velocity Streamlines")
+    axes[1].set_aspect("equal")
+
+    # Custom colorbar for log-velocity with physical labels
+    ticks = np.arange(vmin, vmax + 1)
+    labels = [f"1e{t}" if t != 0 else "1.0" for t in ticks]
+
+    cbar = fig.colorbar(st.lines, ax=axes[1], ticks=ticks, label="|u|")
+    cbar.ax.set_yticklabels(labels)
+
+    plt.tight_layout()
+    plt.savefig(path)
+    plt.close()
+    print(f"Saved {path}")
+

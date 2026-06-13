@@ -38,15 +38,15 @@ import numpy as np
 from .mesh import Mesh
 from .bc import BoundaryConditions
 from . import advection
-from .diffusion import CrankNicolson
-from .pressure import PressureSolver
+from .diffusion import CrankNicolson, create_diffusion_solver
+from .pressure import create_pressure_solver
 from .diagnostics import (
     divergence_norm,
     max_divergence,
     cfl,
     is_blowup,
 )
-from .viz import save_quiver as _save_quiver, save_contour
+from .viz import save_quiver as _save_quiver, save_contour, save_streamlines
 
 
 class Solver:
@@ -193,13 +193,13 @@ class Solver:
             raise ValueError(f"Unknown advection scheme: {advection_scheme}")
 
         if diffusion_scheme == "crank_nicolson":
-            self._diffusion = CrankNicolson(self.mesh, nu, dt, self.bc)
+            self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
         elif diffusion_scheme == "explicit":
             self._diffusion = None
         else:
             raise ValueError(f"Unknown diffusion scheme: {diffusion_scheme}")
 
-        self._pressure = PressureSolver(self.mesh)
+        self._pressure = create_pressure_solver(self.mesh)
 
         # Apply initial boundary conditions
         self.bc.apply(self.u, self.v, Nx, Ny)
@@ -312,6 +312,8 @@ class Solver:
             print(f"  [warning] Requesting {steps:,} steps. This may take a long time.", file=sys.stderr)
         
         t0 = time.time()
+        div = 0.0
+        c = 0.0
         for i in range(steps):
             self.step()
 
@@ -340,8 +342,10 @@ class Solver:
                 elapsed = time.time() - t0
                 rate = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (steps - i - 1) / rate if rate > 0 else 0
-                div = max_divergence(self.u, self.v, self.dx, self.dy)
-                c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                # Compute diagnostics every 10 steps to reduce overhead
+                if i % 10 == 0 or i == steps - 1:
+                    div = max_divergence(self.u, self.v, self.dx, self.dy)
+                    c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
                 # Handle inf CFL gracefully in display
                 cfl_str = f"{c:.3f}" if c != np.inf else "Inf"
                 sys.stdout.write(
@@ -395,6 +399,18 @@ class Solver:
             Scaling factor for vector lengths.
         """
         _save_quiver(self.mesh, self.u, self.v, path, skip, scale)
+
+    def save_streamlines(self, path, density=2.0):
+        """Save a streamline plot of the velocity field and pressure contours.
+
+        Parameters
+        ----------
+        path : str
+            File path to save the image.
+        density : float, optional
+            Density of streamlines in the plot.
+        """
+        save_streamlines(self.mesh, self.u, self.v, self.p, path, density)
 
     def checkpoint(self, path):
         """Save the current solver state to a compressed .npz file.

@@ -14,7 +14,7 @@ from cfd_solver.solver.bc import BoundaryConditions
 from cfd_solver.solver.solver import Solver
 from cfd_solver.solver import advection
 from cfd_solver.solver.diffusion import CrankNicolson, explicit
-from cfd_solver.solver.pressure import PressureSolver
+from cfd_solver.solver.pressure import PressureSolver, FFTPressureSolver, create_pressure_solver
 from cfd_solver.solver import diagnostics
 from cfd_solver.solver.validate import validate_config
 from cfd_solver.solver.viz import save_quiver, save_contour
@@ -182,6 +182,89 @@ def test_pressure_zero_mean():
     assert abs(np.mean(p[1:-1, 1:-1])) < 1e-10
 
 
+def test_fft_pressure_zero_divergence():
+    """Test that FFT pressure solver produces zero pressure for zero divergence."""
+    m = Mesh(1.0, 1.0, 16, 16)
+    ps = FFTPressureSolver(m)
+
+    u_s = np.zeros(m.shape_u)
+    u_s[:, 1:-1] = 1.0
+    v_s = np.zeros(m.shape_v)
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert np.allclose(p[1:-1, 1:-1], 0.0, atol=1e-10)
+
+
+def test_fft_pressure_zero_mean():
+    """Verify that the FFT pressure solver maintains zero-mean pressure."""
+    m = Mesh(1.0, 1.0, 16, 16)
+    ps = FFTPressureSolver(m)
+
+    u_s = np.random.randn(*m.shape_u) * 0.01
+    v_s = np.random.randn(*m.shape_v) * 0.01
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert abs(np.mean(p[1:-1, 1:-1])) < 1e-10
+
+
+def test_fft_vs_splu_pressure_gradients():
+    """Verify that FFT and splu pressure solvers produce matching gradients.
+
+    The two solvers pin pressure differently (p[0]=0 vs mean(p)=0), so
+    the pressure fields differ by a constant.  But the pressure *gradients*
+    must match to machine precision, since gradients are what drive the
+    velocity correction step.
+
+    We test with a realistic CFD-like intermediate velocity to ensure the
+    divergence RHS is approximately zero-mean (as it is in the real solver).
+    """
+    s = Solver(grid_size=(32, 32), nu=0.01, dt=0.0005, lid_speed=1.0,
+               smooth_lid=True)
+    # Run a few steps to get a realistic intermediate velocity
+    for _ in range(3):
+        s.step()
+
+    # Now manually run advection+diffusion to get intermediate velocity
+    from cfd_solver.solver import advection
+    adv_u, adv_v = advection.upwind(s.u, s.v, s.dx, s.dy)
+    u_star, v_star = s._diffusion.solve(s.u, s.v, adv_u, adv_v)
+
+    # Compute the actual divergence (should be approximately zero-mean)
+    dx, dy = s.dx, s.dy
+    div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
+    assert abs(np.mean(div)) < 0.1, f"Div should be ~zero-mean for real CFD data, got {np.mean(div):.4f}"
+
+    ps_splu = PressureSolver(s.mesh)
+    ps_fft = FFTPressureSolver(s.mesh)
+
+    p_splu = ps_splu.solve(u_star, v_star, dt=s.dt)
+    p_fft = ps_fft.solve(u_star, v_star, dt=s.dt)
+
+    # Interior pressure may differ by a constant
+    diff = p_splu[1:-1, 1:-1] - p_fft[1:-1, 1:-1]
+
+    # Gradients must match
+    grad_px_splu = p_splu[2:-1, 1:-1] - p_splu[1:-2, 1:-1]
+    grad_px_fft = p_fft[2:-1, 1:-1] - p_fft[1:-2, 1:-1]
+    assert np.allclose(grad_px_splu, grad_px_fft, atol=1e-8)
+
+    grad_py_splu = p_splu[1:-1, 2:-1] - p_splu[1:-1, 1:-2]
+    grad_py_fft = p_fft[1:-1, 2:-1] - p_fft[1:-1, 1:-2]
+    assert np.allclose(grad_py_splu, grad_py_fft, atol=1e-8)
+
+
+def test_create_pressure_solver_small_grid():
+    """Factory returns splu-based solver for small grids."""
+    m = Mesh(1.0, 1.0, 64, 64)
+    ps = create_pressure_solver(m)
+    assert isinstance(ps, PressureSolver)
+
+
+def test_create_pressure_solver_large_grid():
+    """Factory returns FFT solver for large grids."""
+    m = Mesh(1.0, 1.0, 256, 256)
+    ps = create_pressure_solver(m)
+    assert isinstance(ps, FFTPressureSolver)
+
+
 # ── Diagnostic Tests ──────────────────────────────────────────────────
 
 def test_divergence_uniform_flow():
@@ -307,6 +390,22 @@ def test_lid_cavity_32_no_blowup():
     assert np.max(np.abs(s.u)) < 5.0
 
 
+def test_solver_fft_pressure_128():
+    """Verify the full solver works with FFT pressure backend on a 256x256 grid.
+
+    The factory should automatically select the FFT solver for grids > 128.
+    """
+    s = Solver(grid_size=(256, 256), nu=0.01, dt=0.0001, lid_speed=1.0,
+               smooth_lid=True, force=True)
+    from cfd_solver.solver.pressure import FFTPressureSolver
+    assert isinstance(s._pressure, FFTPressureSolver)
+    for _ in range(3):
+        s.step()
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    assert s.max_divergence() < 1e-3
+
+
 # ── Visualization Tests ───────────────────────────────────────────────
 
 def test_save_quiver(tmp_path):
@@ -324,6 +423,15 @@ def test_save_contour(tmp_path):
     s.step()
     path = tmp_path / "contour.png"
     save_contour(s.mesh, s.u, s.v, s.p, str(path))
+    assert path.exists()
+
+
+def test_save_streamlines(tmp_path):
+    """Test saving a streamline plot of the velocity and pressure fields."""
+    s = Solver(grid_size=(8, 6), nu=0.01, dt=1e-4, lid_speed=1.0)
+    s.step()
+    path = tmp_path / "streamlines.png"
+    s.save_streamlines(str(path))
     assert path.exists()
 
 
@@ -370,6 +478,57 @@ def test_crank_nicolson_smooths_velocity():
     assert np.isfinite(u_star).all()
     # Diffusion should reduce the peak perturbation
     assert np.max(np.abs(u_star)) < np.max(np.abs(u))
+
+
+def test_fft_crank_nicolson_vs_spatial():
+    """Verify that FFTCrankNicolson matches CrankNicolson to machine precision."""
+    m = Mesh(1.0, 1.0, 16, 16)
+    bc = BoundaryConditions(top=1.0, smooth_lid=True)
+    nu = 0.01
+    dt = 0.001
+
+    cn = CrankNicolson(m, nu, dt, bc)
+    from cfd_solver.solver.diffusion import FFTCrankNicolson
+    fft_cn = FFTCrankNicolson(m, nu, dt, bc)
+
+    np.random.seed(42)
+    u = np.random.randn(*m.shape_u) * 0.1
+    v = np.random.randn(*m.shape_v) * 0.1
+    adv_u = np.random.randn(*m.shape_u) * 0.5
+    adv_v = np.random.randn(*m.shape_v) * 0.5
+    bc.apply(u, v, m.Nx, m.Ny)
+
+    u_star_cn, v_star_cn = cn.solve(u, v, adv_u, adv_v)
+    u_star_fft, v_star_fft = fft_cn.solve(u, v, adv_u, adv_v)
+
+    assert np.allclose(u_star_cn, u_star_fft, atol=1e-12)
+    assert np.allclose(v_star_cn, v_star_fft, atol=1e-12)
+
+
+def test_create_diffusion_solver_factory():
+    """Verify create_diffusion_solver selects correct backend based on grid size."""
+    from cfd_solver.solver.diffusion import create_diffusion_solver, FFTCrankNicolson
+    m_small = Mesh(1.0, 1.0, 64, 64)
+    bc = BoundaryConditions()
+    solver_small = create_diffusion_solver(m_small, 0.01, 0.001, bc, threshold=128)
+    assert isinstance(solver_small, CrankNicolson)
+
+    m_large = Mesh(1.0, 1.0, 256, 256)
+    solver_large = create_diffusion_solver(m_large, 0.01, 0.001, bc, threshold=128)
+    assert isinstance(solver_large, FFTCrankNicolson)
+
+
+def test_solver_fft_diffusion_256():
+    """Verify full solver step and max divergence with FFT diffusion solver."""
+    s = Solver(grid_size=(256, 256), nu=0.01, dt=0.0001, lid_speed=1.0,
+               smooth_lid=True, force=True)
+    from cfd_solver.solver.diffusion import FFTCrankNicolson
+    assert isinstance(s._diffusion, FFTCrankNicolson)
+    for _ in range(3):
+        s.step()
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    assert s.max_divergence() < 1e-3
 
 
 # ── Checkpoint Round-Trip Tests ──────────────────────────────────────
