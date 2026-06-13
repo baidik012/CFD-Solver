@@ -55,15 +55,15 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 **Numerical schemes:**
 - Advection: upwind (1st order) or central (2nd order) — pluggable
-- Diffusion: Crank-Nicolson semi-implicit (unconditionally stable) with pre-factorized direct LU solver
-- Pressure: Direct sparse LU solver (pre-factorized at init) — fast constant-coefficient solve per step
+- Diffusion: Crank-Nicolson semi-implicit (unconditionally stable) with FFT spectral solver (DST-I) for large grids
+- Pressure: Poisson solver with FFT spectral method (DCT-II) for large grids — O(N log N) per step
 
 | Term | What it means |
 |------|---------------|
 | C-grid | Staggered arrangement: u/v at faces, p at centers |
 | Projection | Guess first, fix the pressure later |
 | Divergence-free | Fluid coming in must go out |
-| Direct Solver | Solve AX=B once by factoring A; very fast for constant matrices |
+| FFT Solver | Spectral diagonalization in frequency domain — O(N log N), no factorization |
 
 ---
 
@@ -76,8 +76,8 @@ CFD-Solver/
 │   │   ├── mesh.py             # Staggered grid generation
 │   │   ├── bc.py               # Boundary conditions
 │   │   ├── advection.py        # Upwind & central difference schemes
-│   │   ├── diffusion.py        # Crank-Nicolson with direct LU solver
-│   │   ├── pressure.py         # Poisson solver (direct LU decomposition)
+│   │   ├── diffusion.py        # Crank-Nicolson (splu) & FFT (DST-I) solvers
+│   │   ├── pressure.py         # Poisson solver: splu + FFT (DCT-II), auto-selected
 │   │   ├── diagnostics.py      # CFL, divergence, blowup detection
 │   │   ├── validate.py         # YAML config schema validation
 │   │   ├── solver.py           # Public API (Chorin step & Solver class)
@@ -86,7 +86,7 @@ CFD-Solver/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Ready-to-run simulations
 ├── output/                      # Results and plots
-├── tests/                       # Unit tests (46 tests)
+├── tests/                       # Unit tests (57 tests)
 ├── run_interactive.py           # Interactive parameter setup
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
@@ -105,17 +105,18 @@ CFD-Solver/
 
 **Original development machine:** Intel Core i7-13620H (10 cores, up to 5.0 GHz), 16 GB RAM, Linux.
 
-**Expected performance (20 seconds simulated time, Re=100):**
+**Expected performance (200 time steps):**
 
-| Grid | Time |
-|------|------|
-| 32×32 | 0.1 s |
-| 64×64 | 0.2 s |
-| 128×128 | 1.0 s |
-| 256×256 | 10.5 s |
-| 512×512 | 28.3 s |
+| Grid | splu (s) | FFT (s) | Speedup |
+|------|---------|---------|---------|
+| 32×32 | 0.07 | — | — |
+| 64×64 | 0.22 | — | — |
+| 128×128 | 1.1 | 1.1 | 1× |
+| 256×256 | 5.0 | 0.8 | 6× |
+| 512×512 | 31.4 | 8.0 | 4× |
+| 1024×1024 | ~170 | 58 | 3× |
 
-The solver auto-scales `dt` to keep the simulation stable at fine grids. Smaller viscosity (higher Re) produces smaller `dt` values, increasing wall time. The default `simulation_time` adapts to your flow parameters automatically.
+For grids > 128, the solver automatically switches to FFT-based spectral solvers (DCT-II for pressure, DST-I for diffusion), giving O(N log N) performance instead of O(N^1.5).
 
 ---
 
