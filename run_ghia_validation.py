@@ -1,11 +1,16 @@
 """
 Ghia validation script for the Lid-Driven Cavity flow.
 
-This script runs the CFD solver for a standard benchmark case (Reynolds number = 100)
-and extracts the velocity profiles along the vertical and horizontal centerlines.
-The results can be compared against the classical data from Ghia et al. (1982).
-The script performs necessary interpolations because velocity components (u, v)
-are stored at staggered face locations.
+Compares the solver output against the benchmark data from:
+    Ghia, U., Ghia, K.N., & Shin, C.T. (1982).
+    High-Re solutions for incompressible flow using the Navier-Stokes
+    equations and a multigrid method. Journal of Computational Physics, 48(3), 387-411.
+
+Run directly:
+    python run_ghia_validation.py
+
+Compares u-velocity along x=0.5 and v-velocity along y=0.5 against the
+tabulated Ghia data for Re=100.
 """
 
 import os
@@ -17,100 +22,228 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from cfd_solver.solver import Solver
 
-# --- Solver Configuration ---
-# Solver parameters for Re=100 (U=1, L=1, nu = UL/Re = 1*1/100 = 0.01)
-grid_size = (128, 128)
-nu = 0.01
-dt = 0.001
-lid_speed = 1.0
-steps = 10000  # sufficiently large number of steps to reach steady state
+# --- Ghia et al. (1982) Reference Data for Re=100 ---
+# Tabulated from Table II in the paper.
 
-print(
-    f"Running Ghia validation for Re={int(lid_speed * 1.0 / nu)} "
-    f"with grid_size={grid_size}, nu={nu}, dt={dt}, lid_speed={lid_speed}, steps={steps}"
-)
+# u-velocity along the vertical centerline (x = 0.5)
+# Columns: y, u
+GHIA_Y = np.array([
+    0.0000, 0.0547, 0.0625, 0.0703, 0.1016, 0.1719, 0.2813,
+    0.4531, 0.5000, 0.6172, 0.7344, 0.8516, 0.9531, 0.9609,
+    0.9688, 0.9766, 1.0000,
+])
+GHIA_U = np.array([
+    0.00000, -0.03717, -0.04192, -0.04775, -0.06434, -0.10150,
+    -0.15662, -0.21090, -0.20581, -0.13641, 0.00332, 0.23151,
+    0.68717, 0.73722, 0.78871, 0.84123, 1.00000,
+])
 
-# Initialize the solver with central advection for better accuracy in this benchmark
-solver = Solver(
-    grid_size=grid_size,
-    nu=nu,
-    dt=dt,
-    lid_speed=lid_speed,
-    smooth_lid=False,  # Ghia uses standard (non-smooth) lid
-    advection_scheme="central",
-)
+# v-velocity along the horizontal centerline (y = 0.5)
+# Columns: x, v
+GHIA_X = np.array([
+    0.0000, 0.0625, 0.0703, 0.0781, 0.0938, 0.1563, 0.2266,
+    0.2344, 0.5000, 0.8047, 0.8594, 0.9063, 0.9453, 0.9531,
+    0.9609, 0.9688, 1.0000,
+])
+GHIA_V = np.array([
+    0.00000, 0.09233, 0.10091, 0.10890, 0.12317, 0.16077,
+    0.17507, 0.17527, 0.05454, -0.24533, -0.22445, -0.16914,
+    -0.10313, -0.08864, -0.07391, -0.05906, 0.00000,
+])
 
-# Execute the simulation
-solver.solve(steps, verbose=True)
 
-# --- Velocity Profile Extraction ---
-# u is stored at vertical faces x = xf[i], shape (Nx+1, Ny+2) with ghost in y.
-# v is stored at horizontal faces y = yv[j], shape (Nx+2, Ny+1) with ghost in x.
-#
-# Ghia-style comparisons typically want values along the geometric lines:
-#   x = 0.5 (vertical centerline) and y = 0.5 (horizontal centerline).
-# Because u and v are face-based, we interpolate onto the probe lines.
+def extract_u_profile(solver, x_probe=0.5):
+    """Extract u-velocity along a vertical line at x = x_probe.
 
-x_probe = 0.5
-y_probe = 0.5
+    Interpolates between the two nearest u-faces to get values on the
+    cell-center y-grid.
 
-# 1. Extract U-profile at x = x_probe, as a function of y
-# We use cell-center y-coordinates (mesh.yc) for the vertical distribution.
-# Exclude ghost cells in y: u[:, 1:-1] -> shape (Nx+1, Ny)
-u_interior_y = solver.u[:, 1:-1]
-u_face_x = solver.mesh.xf  # shape (Nx+1,)
+    Returns
+    -------
+    y : ndarray
+        y-coordinates (cell centers).
+    u : ndarray
+        Interpolated u-velocity at each y.
+    """
+    mesh = solver.mesh
+    u_interior = solver.u[:, 1:-1]  # (Nx+1, Ny)
+    xf = mesh.xf
 
-# Validate probe location
-if not (u_face_x[0] <= x_probe <= u_face_x[-1]):
-    raise ValueError(
-        f"x_probe={x_probe} outside u face range [{u_face_x[0]}, {u_face_x[-1]}]"
+    i = int(np.searchsorted(xf, x_probe) - 1)
+    i = max(0, min(i, len(xf) - 2))
+
+    x0, x1 = xf[i], xf[i + 1]
+    t = (x_probe - x0) / (x1 - x0) if x1 != x0 else 0.0
+    u_profile = (1.0 - t) * u_interior[i, :] + t * u_interior[i + 1, :]
+
+    return mesh.yc.copy(), u_profile
+
+
+def extract_v_profile(solver, y_probe=0.5):
+    """Extract v-velocity along a horizontal line at y = y_probe.
+
+    Interpolates between the two nearest v-faces to get values on the
+    cell-center x-grid.
+
+    Returns
+    -------
+    x : ndarray
+        x-coordinates (cell centers).
+    v : ndarray
+        Interpolated v-velocity at each x.
+    """
+    mesh = solver.mesh
+    v_interior = solver.v[1:-1, :]  # (Nx, Ny+1)
+    yv = mesh.yv
+
+    j = int(np.searchsorted(yv, y_probe) - 1)
+    j = max(0, min(j, len(yv) - 2))
+
+    y0, y1 = yv[j], yv[j + 1]
+    s = (y_probe - y0) / (y1 - y0) if y1 != y0 else 0.0
+    v_profile = (1.0 - s) * v_interior[:, j] + s * v_interior[:, j + 1]
+
+    return mesh.xc.copy(), v_profile
+
+
+def interpolate_to_ghia(xy_solver, uv_solver, xy_ghia):
+    """Interpolate solver profile onto Ghia stations using linear interpolation.
+
+    Parameters
+    ----------
+    xy_solver : ndarray
+        Solver coordinate array (y for u-profile, x for v-profile).
+    uv_solver : ndarray
+        Solver velocity values at those coordinates.
+    xy_ghia : ndarray
+        Ghia tabulated coordinate stations.
+
+    Returns
+    -------
+    uv_interp : ndarray
+        Solver values interpolated to Ghia stations.
+    """
+    return np.interp(xy_ghia, xy_solver, uv_solver)
+
+
+def compute_errors(sol, ref):
+    """Compute L2 and max absolute error.
+
+    Parameters
+    ----------
+    sol : ndarray
+        Solver values at reference stations.
+    ref : ndarray
+        Reference (Ghia) values.
+
+    Returns
+    -------
+    l2 : float
+        L2 norm of the error (not normalized).
+    max_err : float
+        Maximum absolute error.
+    """
+    err = sol - ref
+    l2 = np.sqrt(np.mean(err ** 2))
+    max_err = np.max(np.abs(err))
+    return l2, max_err
+
+
+def print_comparison_table(stations, ref, sol, label):
+    """Print a comparison table."""
+    print(f"\n--- {label} ---")
+    print(f"| {'Station':>8} | {'Ghia':>12} | {'Solver':>12} | {'Abs Error':>12} |")
+    print(f"|{'-'*10}|{'-'*14}|{'-'*14}|{'-'*14}|")
+    for st, r, s in zip(stations, ref, sol):
+        print(f"| {st:>8.4f} | {r:>12.5f} | {s:>12.5f} | {abs(s - r):>12.5f} |")
+
+
+def main():
+    # --- Solver Configuration ---
+    grid_size = (128, 128)
+    nu = 0.01
+    dt = 0.001
+    lid_speed = 1.0
+    steps = 10000
+
+    Re = int(lid_speed / nu)
+    print(
+        f"Ghia validation: Re={Re}, grid={grid_size}, "
+        f"nu={nu}, dt={dt}, steps={steps}"
     )
 
-# Linear interpolation between the two nearest x-faces
-i = int(np.searchsorted(u_face_x, x_probe) - 1)
-i = max(0, min(i, len(u_face_x) - 2))
-
-x0, x1 = u_face_x[i], u_face_x[i + 1]
-t = (x_probe - x0) / (x1 - x0) if x1 != x0 else 0.0
-
-u_profile = (1.0 - t) * u_interior_y[i, :] + t * u_interior_y[i + 1, :]
-u_centerline_y = solver.mesh.yc  # shape (Ny,)
-
-# 2. Extract V-profile at y = y_probe, as a function of x
-# We use cell-center x-coordinates (mesh.xc) for the horizontal distribution.
-# Exclude ghost cells in x: v[1:-1, :] -> shape (Nx, Ny+1)
-v_interior_x = solver.v[1:-1, :]
-v_face_y = solver.mesh.yv  # shape (Ny+1,)
-
-# Validate probe location
-if not (v_face_y[0] <= y_probe <= v_face_y[-1]):
-    raise ValueError(
-        f"y_probe={y_probe} outside v face range [{v_face_y[0]}, {v_face_y[-1]}]"
+    solver = Solver(
+        grid_size=grid_size,
+        nu=nu,
+        dt=dt,
+        lid_speed=lid_speed,
+        smooth_lid=False,
+        advection_scheme="central",
     )
+    solver.solve(steps, verbose=True)
 
-# Linear interpolation between the two nearest y-faces
-j = int(np.searchsorted(v_face_y, y_probe) - 1)
-j = max(0, min(j, len(v_face_y) - 2))
+    # --- Extract profiles ---
+    y_solver, u_solver = extract_u_profile(solver, x_probe=0.5)
+    x_solver, v_solver = extract_v_profile(solver, y_probe=0.5)
 
-y0, y1 = v_face_y[j], v_face_y[j + 1]
-s = (y_probe - y0) / (y1 - y0) if y1 != y0 else 0.0
+    # --- Interpolate onto Ghia stations ---
+    u_at_ghia = interpolate_to_ghia(y_solver, u_solver, GHIA_Y)
+    v_at_ghia = interpolate_to_ghia(x_solver, v_solver, GHIA_X)
 
-v_profile = (1.0 - s) * v_interior_x[:, j] + s * v_interior_x[:, j + 1]
-v_centerline_x = solver.mesh.xc  # shape (Nx,)
+    # --- Error metrics ---
+    u_l2, u_max = compute_errors(u_at_ghia, GHIA_U)
+    v_l2, v_max = compute_errors(v_at_ghia, GHIA_V)
 
-# Sanity checks
-assert len(u_profile) == len(u_centerline_y), "u_profile and u_centerline_y length mismatch"
-assert len(v_profile) == len(v_centerline_x), "v_profile and v_centerline_x length mismatch"
+    print(f"\n{'='*60}")
+    print(f"  ERROR METRICS")
+    print(f"{'='*60}")
+    print(f"  u-profile (x=0.5):  L2 = {u_l2:.6f},  Max = {u_max:.6f}")
+    print(f"  v-profile (y=0.5):  L2 = {v_l2:.6f},  Max = {v_max:.6f}")
+    print(f"{'='*60}")
 
-# --- Output Results ---
-print("\n--- U-velocity along vertical centerline (x=0.5) [interpolated] ---")
-print("| y      | u            |")
-print("|--------|--------------|")
-for y, u_val in zip(u_centerline_y, u_profile):
-    print(f"| {y:<6.4f} | {u_val:<12.5f} |")
+    # --- Comparison tables ---
+    print_comparison_table(GHIA_Y, GHIA_U, u_at_ghia, "U-velocity along x=0.5")
+    print_comparison_table(GHIA_X, GHIA_V, v_at_ghia, "V-velocity along y=0.5")
 
-print("\n--- V-velocity along horizontal centerline (y=0.5) [interpolated] ---")
-print("| x      | v            |")
-print("|--------|--------------|")
-for x, v_val in zip(v_centerline_x, v_profile):
-    print(f"| {x:<6.4f} | {v_val:<12.5f} |")
+    # --- Plot ---
+    matplotlib_available = True
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        matplotlib_available = False
+        print("\n[skip] matplotlib not available — skipping plot generation.")
+
+    if matplotlib_available:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Left: u-velocity
+        ax1.plot(u_at_ghia, GHIA_Y, "b-", linewidth=1.5, label="Solver (128x128)")
+        ax1.plot(GHIA_U, GHIA_Y, "ks", markersize=5, label="Ghia et al. (1982)")
+        ax1.set_xlabel("u-velocity")
+        ax1.set_ylabel("y")
+        ax1.set_title("U along x = 0.5")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Right: v-velocity
+        ax2.plot(GHIA_X, v_at_ghia, "b-", linewidth=1.5, label="Solver (128x128)")
+        ax2.plot(GHIA_X, GHIA_V, "ks", markersize=5, label="Ghia et al. (1982)")
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("v-velocity")
+        ax2.set_title("V along y = 0.5")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        fig.suptitle(f"Ghia Validation — Re=100, 128x128, {steps} steps", fontsize=13)
+        fig.tight_layout()
+
+        out_path = os.path.join(os.path.dirname(__file__), "ghia_comparison.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        print(f"\nPlot saved to: {out_path}")
+        plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()
