@@ -41,5 +41,5 @@ test_512.py
 AUDIT_REPORT.md
 CODE_REVIEW_AND_FIXES.md
 output_*.png
-ghia_comparison.png
-ghia_re*.png
+/ghia_comparison.png
+/ghia_re*.png

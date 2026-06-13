@@ -7,6 +7,7 @@ An internal tool for simulating incompressible fluid flow. Built by the club to 
 ## Table of Contents
 - [The Physics](#the-physics)
 - [How We Solve It](#how-we-solve-it)
+- [Validation](#validation)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Contributing](#contributing)
@@ -64,6 +65,37 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 | Projection | Guess first, fix the pressure later |
 | Divergence-free | Fluid coming in must go out |
 | FFT Solver | Spectral diagonalization in frequency domain — O(N log N), no factorization |
+
+---
+
+## Validation
+
+Tested against the benchmark data from [Ghia, Ghia & Shin (1982)](https://doi.org/10.1016/0021-9991(82)90055-1) for lid-driven cavity flow:
+
+| Re | Grid | Advection | u-L2 | v-L2 |
+|----|------|-----------|------|------|
+| 100 | 128×128 | central | 0.007 | 0.005 |
+| 400 | 128×128 | central | 0.011 | 0.035 |
+| 1000 | 256×256 | upwind | 0.050 | 0.054 |
+
+**Re=100** — u and v profiles match within 0.7%:
+
+![Re=100](images/ghia_re100.png)
+
+**Re=400** — strong secondary vortex, still good agreement:
+
+![Re=400](images/ghia_re400.png)
+
+**Re=1000** — thin boundary layers stress the first-order upwind scheme, but the solution stays stable:
+
+![Re=1000](images/ghia_re1000.png)
+
+Reproduce with:
+```bash
+python run_ghia_validation.py 100
+python run_ghia_validation.py 400
+python run_ghia_validation.py 1000
+```
 
 ---
 
