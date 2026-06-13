@@ -22,10 +22,10 @@ REM Use venv Python directly — no activation needed
 set VENV_PYTHON=venv\Scripts\python.exe
 
 REM Install dependencies if numpy is not available
-%VENV_PYTHON% -c "import numpy, scipy, matplotlib, yaml, cfd_solver" >nul 2>&1
+%VENV_PYTHON% -c "import numpy, scipy, matplotlib, yaml" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [..] Installing dependencies...
-    %VENV_PYTHON% -m pip install -r requirements.txt
+    %VENV_PYTHON% -m pip install -r requirements.txt -q
     if %errorlevel% neq 0 (
         echo.
         echo ERROR: Failed to install dependencies.
