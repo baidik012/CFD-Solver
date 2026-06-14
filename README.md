@@ -127,7 +127,7 @@ CFD-Solver/
 │   ├── couette/                 # Couette flow (periodic x)
 │   └── taylor_green/            # Taylor-Green vortex (periodic x)
 ├── images/                      # Validation & example output plots
-├── tests/                       # Unit tests (128 tests)
+├── tests/                       # Unit tests (132 tests)
 ├── run_interactive.py           # Interactive parameter setup
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
