@@ -3,6 +3,9 @@
 Results from bundled simulation examples. Each example has a `config.yaml` and
 `run.py` in its directory under `examples/`.
 
+For detailed validation results, error analysis, and convergence studies, see
+[VALIDATION.md](VALIDATION.md).
+
 ---
 
 ## Lid-Driven Cavity
@@ -19,6 +22,8 @@ for incompressible Navier-Stokes solvers.
 ```bash
 python examples/cavity/run.py
 ```
+
+See [VALIDATION.md](VALIDATION.md#lid-driven-cavity) for Ghia benchmark comparison.
 
 ---
 
@@ -37,6 +42,8 @@ With periodic x BCs, the profile converges to the linear Couette solution.
 ```bash
 python examples/couette/run.py
 ```
+
+See [VALIDATION.md](VALIDATION.md#couette-flow) for analytical solution comparison.
 
 ---
 
@@ -68,6 +75,8 @@ Error halves with each refinement (second-order convergence).
 python examples/taylor_green/run.py
 ```
 
+See [VALIDATION.md](VALIDATION.md#taylor-green-vortex) for exact solution comparison and convergence study.
+
 ---
 
 ## Channel Flow (Poiseuille)
@@ -82,3 +91,5 @@ force or by inlet/outlet BCs.
 python examples/channel_flow/run.py --variant body-force
 python examples/channel_flow/run.py --variant inlet
 ```
+
+See [VALIDATION.md](VALIDATION.md#channel-flow-poiseuille) for parabolic profile comparison.

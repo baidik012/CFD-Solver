@@ -1716,3 +1716,33 @@ def test_cli_parse_boundary_periodic():
     assert isinstance(bc.walls['right'], PeriodicWall)
     assert isinstance(bc.walls['top'], FreeSlipWall)
     assert isinstance(bc.walls['bottom'], FreeSlipWall)
+
+
+# ── Validation Tests ────────────────────────────────────────────────
+
+def test_taylor_green_validation():
+    """Taylor-Green vortex L2 error below threshold."""
+    from examples.taylor_green.validate import validate
+    l2 = validate()
+    assert l2 < 0.05
+
+
+def test_couette_validation():
+    """Couette flow L2 error below threshold."""
+    from examples.couette.validate import validate
+    l2 = validate()
+    assert l2 < 0.5
+
+
+def test_channel_validation():
+    """Channel flow L2 error below threshold."""
+    from examples.channel_flow.validate import validate
+    l2 = validate()
+    assert l2 < 0.01
+
+
+def test_cavity_ghia_validation():
+    """Cavity Ghia L2 error below threshold (Re=100)."""
+    from examples.cavity.validate import validate
+    l2 = validate(Re=100)
+    assert l2 < 0.1
