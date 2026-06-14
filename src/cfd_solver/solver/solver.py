@@ -199,6 +199,15 @@ class Solver:
         self.v = np.zeros(self.mesh.shape_v)
         self.p = np.zeros(self.mesh.shape_p)
 
+        # Pre-allocated intermediate buffers (avoids per-step allocation)
+        self._u_star = np.zeros(self.mesh.shape_u)
+        self._v_star = np.zeros(self.mesh.shape_v)
+
+        # Pre-allocated contiguous buffers for diagnostics
+        self._u_phys = np.empty((Nx + 1, Ny), dtype=np.float64)
+        self._v_phys = np.empty((Nx, Ny + 1), dtype=np.float64)
+        self._div_buf = np.empty((Nx, Ny), dtype=np.float64)
+
         # Configure numerical schemes
         if advection_scheme == "upwind":
             self._advection_fn = advection.upwind
@@ -209,13 +218,13 @@ class Solver:
 
         if diffusion_scheme == "crank_nicolson":
             # Crank-Nicolson matrices encode the BC type at construction time.
-            # Non-standard BCs (inlet, outlet, free-slip) would require matrix
-            # rebuilds.  Fall back to explicit diffusion for simplicity.
-            _has_nonstandard = any(
-                not isinstance(w, NoSlipWall)
+            # Periodic walls require a fundamentally different matrix structure
+            # (circulant) so fall back to explicit for that case.
+            _has_periodic = any(
+                isinstance(w, PeriodicWall)
                 for w in self.bc.walls.values()
             )
-            if _has_nonstandard:
+            if _has_periodic:
                 self._diffusion = None
             else:
                 self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
@@ -279,13 +288,17 @@ class Solver:
 
         if self._diffusion is not None:
             # Semi-implicit Crank-Nicolson
-            u_star, v_star = self._diffusion.solve(self.u, self.v, adv_u, adv_v)
+            u_star, v_star = self._diffusion.solve(
+                self.u, self.v, adv_u, adv_v,
+                u_out=self._u_star, v_out=self._v_star,
+            )
         else:
             # Explicit Forward Euler
             from .diffusion import explicit
             u_star, v_star = explicit(
                 self.u, self.v, adv_u, adv_v, dx, dy, dt,
                 self.nu, self.bc, Nx, Ny,
+                u_out=self._u_star, v_out=self._v_star,
             )
 
         # Body force: add external forces to intermediate velocity
@@ -384,7 +397,7 @@ class Solver:
             # Stability check: ensure velocities haven't exploded
             if is_blowup(self.u, self.v):
                 if verbose:
-                    c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                    c = self.cfl()
                     # If CFL is inf, the field has NaN/Inf; suggest much smaller dt
                     if c == np.inf:
                         safe_dt = self.dt * 0.1
@@ -425,8 +438,8 @@ class Solver:
                 eta = (steps - i - 1) / rate if rate > 0 else 0
                 # Compute diagnostics every 10 steps to reduce overhead
                 if i % 10 == 0 or i == steps - 1:
-                    div = max_divergence(self.u, self.v, self.dx, self.dy)
-                    c = cfl(self.u, self.v, self.dx, self.dy, self.dt)
+                    div = self.max_divergence()
+                    c = self.cfl()
                 # Handle inf CFL gracefully in display
                 cfl_str = f"{c:.3f}" if c != np.inf else "Inf"
                 sys.stdout.write(
@@ -443,15 +456,32 @@ class Solver:
 
     def divergence_norm(self):
         """Calculate the RMS divergence of the current velocity field."""
-        return divergence_norm(self.u, self.v, self.dx, self.dy)
+        self._u_phys[:] = self.u[:, 1:-1]
+        self._v_phys[:] = self.v[1:-1, :]
+        self._div_buf[:] = (self._u_phys[1:, :] - self._u_phys[:-1, :]) / self.dx + \
+                           (self._v_phys[:, 1:] - self._v_phys[:, :-1]) / self.dy
+        return float(np.sqrt(np.mean(self._div_buf ** 2)))
 
     def max_divergence(self, interior_only=False):
         """Calculate the maximum absolute divergence."""
-        return max_divergence(self.u, self.v, self.dx, self.dy, interior_only)
+        self._u_phys[:] = self.u[:, 1:-1]
+        self._v_phys[:] = self.v[1:-1, :]
+        self._div_buf[:] = (self._u_phys[1:, :] - self._u_phys[:-1, :]) / self.dx + \
+                           (self._v_phys[:, 1:] - self._v_phys[:, :-1]) / self.dy
+        d = self._div_buf
+        if interior_only and d.shape[0] > 2 and d.shape[1] > 2:
+            d = d[1:-1, 1:-1]
+        return float(np.max(np.abs(d)))
 
     def cfl(self):
         """Calculate the current maximum CFL number."""
-        return cfl(self.u, self.v, self.dx, self.dy, self.dt)
+        if not (np.all(np.isfinite(self.u)) and np.all(np.isfinite(self.v))):
+            return np.inf
+        self._u_phys[:] = self.u[:, 1:-1]
+        self._v_phys[:] = self.v[1:-1, :]
+        u_max = np.max(np.abs(self._u_phys))
+        v_max = np.max(np.abs(self._v_phys))
+        return u_max * self.dt / self.dx + v_max * self.dt / self.dy
 
     def save(self, path, skip=None, scale=None):
         """Save a visualization of pressure and velocity magnitude.

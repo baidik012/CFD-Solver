@@ -1051,8 +1051,8 @@ def test_solver_inlet_outlet_runs():
     assert abs(inlet_flux - outlet_flux) / max(inlet_flux, 1e-10) < 0.5
 
 
-def test_solver_uses_explicit_diffusion_for_inlet():
-    """Solver falls back to explicit diffusion when inlet BC is used."""
+def test_solver_uses_crank_nicolson_for_inlet():
+    """Solver uses Crank-Nicolson even with inlet BC (matrices encode BC type)."""
     bc = BoundaryConditions(
         left=InletWall(profile="uniform", U_max=1.0),
         right=OutletWall(method="zero_gradient"),
@@ -1065,8 +1065,8 @@ def test_solver_uses_explicit_diffusion_for_inlet():
         diffusion_scheme="crank_nicolson",
         boundary_config=bc,
     )
-    # Should fall back to explicit (None = explicit path in step())
-    assert s._diffusion is None
+    # Should use Crank-Nicolson (no longer falls back to explicit)
+    assert s._diffusion is not None
 
 
 def test_solver_noslip_still_uses_crank_nicolson():
