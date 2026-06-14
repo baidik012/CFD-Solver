@@ -8,6 +8,7 @@ An internal tool for simulating incompressible fluid flow. Built by the club to 
 - [The Physics](#the-physics)
 - [How We Solve It](#how-we-solve-it)
 - [Validation](#validation)
+- [Examples](#examples)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Contributing](#contributing)
@@ -74,21 +75,9 @@ Tested against the benchmark data from [Ghia, Ghia & Shin (1982)](https://doi.or
 
 | Re | Grid | Advection | u-L2 | v-L2 |
 |----|------|-----------|------|------|
-| 100 | 128×128 | central | 0.007 | 0.005 |
-| 400 | 128×128 | central | 0.011 | 0.035 |
-| 1000 | 256×256 | upwind | 0.050 | 0.054 |
-
-**Re=100** — u and v profiles match within 0.7%:
-
-![Re=100](images/ghia_re100.png)
-
-**Re=400** — strong secondary vortex, still good agreement:
-
-![Re=400](images/ghia_re400.png)
-
-**Re=1000** — thin boundary layers stress the first-order upwind scheme, but the solution stays stable:
-
-![Re=1000](images/ghia_re1000.png)
+| 100 | 128x128 | central | 0.007 | 0.005 |
+| 400 | 128x128 | central | 0.011 | 0.035 |
+| 1000 | 256x256 | upwind | 0.050 | 0.054 |
 
 Reproduce with:
 ```bash
@@ -99,6 +88,21 @@ python run_ghia_validation.py 1000
 
 ---
 
+## Examples
+
+Bundled simulations with configs and scripts in `examples/`:
+
+| Example | Key Feature | BCs |
+|---------|-------------|-----|
+| **Cavity** | Lid-driven recirculation | Smooth lid, no-slip walls |
+| **Couette** | Parallel plate flow | No-slip top/bottom, periodic x |
+| **Taylor-Green** | Decaying vortex (analytical) | Free-slip y, periodic x |
+| **Channel** | Pressure-driven Poiseuille | Inlet/outlet or body force |
+
+See [EXAMPLES.md](EXAMPLES.md) for output images, error analysis, and grid convergence results.
+
+---
+
 ## Project Structure
 
 ```
@@ -106,10 +110,10 @@ CFD-Solver/
 ├── src/cfd_solver/             # The solver package
 │   ├── solver/
 │   │   ├── mesh.py             # Staggered grid generation
-│   │   ├── bc.py               # Boundary conditions
+│   │   ├── bc.py               # Boundary conditions (wall types + periodic)
 │   │   ├── advection.py        # Upwind & central difference schemes
 │   │   ├── diffusion.py        # Crank-Nicolson (splu) & FFT (DST-I) solvers
-│   │   ├── pressure.py         # Poisson solver: splu + FFT (DCT-II), auto-selected
+│   │   ├── pressure.py         # Poisson solver: splu + FFT + periodic spectral
 │   │   ├── diagnostics.py      # CFL, divergence, blowup detection
 │   │   ├── validate.py         # YAML config schema validation
 │   │   ├── solver.py           # Public API (Chorin step & Solver class)
@@ -118,8 +122,12 @@ CFD-Solver/
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Ready-to-run simulations
-├── output/                      # Results and plots
-├── tests/                       # Unit tests (57 tests)
+│   ├── cavity/                  # Lid-driven cavity
+│   ├── channel_flow/            # Poiseuille flow (inlet or body force)
+│   ├── couette/                 # Couette flow (periodic x)
+│   └── taylor_green/            # Taylor-Green vortex (periodic x)
+├── images/                      # Validation & example output plots
+├── tests/                       # Unit tests (128 tests)
 ├── run_interactive.py           # Interactive parameter setup
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup

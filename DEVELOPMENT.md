@@ -9,10 +9,10 @@ CFD-Solver/
 ├── src/cfd_solver/
 │   ├── solver/
 │   │   ├── mesh.py             # Staggered grid generation
-│   │   ├── bc.py               # Boundary conditions & smooth profiles
+│   │   ├── bc.py               # Boundary conditions (wall types + periodic)
 │   │   ├── advection.py        # Pluggable advection schemes
 │   │   ├── diffusion.py        # Explicit Euler, Crank-Nicolson, FFT Crank-Nicolson
-│   │   ├── pressure.py         # Poisson solver: splu + FFT, auto-selected
+│   │   ├── pressure.py         # Poisson solver: splu + FFT + periodic spectral
 │   │   ├── diagnostics.py      # CFL, divergence, blowup detection
 │   │   ├── validate.py         # YAML config schema validation
 │   │   ├── solver.py           # Public API (Chorin step & Solver class)
@@ -21,8 +21,12 @@ CFD-Solver/
 │   └── cli/
 │       └── __init__.py         # CLI entry point
 ├── examples/                    # Example scripts and configs
-├── output/                      # Solver output images
-├── tests/                       # Unit tests (57 tests)
+│   ├── cavity/                  # Lid-driven cavity
+│   ├── channel_flow/            # Poiseuille flow (inlet or body force)
+│   ├── couette/                 # Couette flow (periodic x)
+│   └── taylor_green/            # Taylor-Green vortex (periodic x)
+├── images/                      # Validation & example output plots
+├── tests/                       # Unit tests (128 tests)
 ├── run_interactive.py           # Interactive parameter prompts
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
@@ -38,10 +42,10 @@ The solver is split into focused modules with clear responsibilities:
 | Module | Responsibility |
 |--------|---------------|
 | `mesh.py` | Grid generation, coordinate arrays, spacing |
-| `bc.py` | Boundary conditions, smooth lid profiles |
+| `bc.py` | Boundary conditions: NoSlip, FreeSlip, Inlet, Outlet, Periodic |
 | `advection.py` | Upwind (1st order) & central (2nd order) schemes |
 | `diffusion.py` | Explicit Euler, Crank-Nicolson (splu), FFT Crank-Nicolson (DST-I) |
-| `pressure.py` | Poisson solver: splu + FFT (DCT-II), auto-selected by factory |
+| `pressure.py` | Poisson solver: splu + FFT (DCT-II) + Periodic (DFT+DCT) |
 | `diagnostics.py` | CFL, divergence norms, blowup detection |
 | `validate.py` | YAML config schema validation |
 | `solver.py` | Public API: Chorin step, `Solver` class, checkpoint/resume |
@@ -249,4 +253,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-All 57 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, and the full Solver API.
+All 128 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, the full Solver API, body forces, initial conditions, time tracking, convergence, periodic boundary conditions, and example validation.
