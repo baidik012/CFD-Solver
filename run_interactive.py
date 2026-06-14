@@ -35,37 +35,34 @@ def ask(prompt, default):
     return type(default)(val) if val else default
 
 
-def main():
+def run_example(example):
+    """Run a bundled example from the examples/ directory.
+
+    Parameters
+    ----------
+    example : str
+        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
     """
-    Main entry point for the interactive CFD solver.
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    Handles the interactive loop: checking for updates, displaying the banner,
-    gathering parameters, running the solver, and saving/opening the results.
-    """
-    # Check for updates before showing the banner so the notice appears first
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-        from cfd_solver.version_check import check_for_updates
-        check_for_updates(repo_dir=os.path.dirname(__file__) or ".")
-    except Exception:
-        pass  # never let a version-check failure block the solver
+    examples = {
+        "cavity": "examples/cavity/run.py",
+        "couette": "examples/couette/run.py",
+        "taylor_green": "examples/taylor_green/run.py",
+        "channel": "examples/channel_flow/run.py",
+    }
 
-    try:
-        from cfd_solver import __version__
-        version_str = __version__
-    except Exception:
-        version_str = "unknown"
-
+    script_path = os.path.join(script_dir, examples[example])
+    print(f"  Running {example} example...")
     print()
-    print("========================================")
-    print("  CFD Solver — Interactive Setup")
-    print("========================================")
-    print(f"  Version: {version_str}")
-    print()
+    subprocess.run([sys.executable, script_path], check=False)
+
+
+def run_custom():
+    """Run the interactive custom setup (cavity with user-specified parameters)."""
     print("Press Enter to accept defaults shown in [brackets].")
     print()
 
-    # Gather simulation parameters
     Nx = ask("Grid cells in x", 32)
     Ny = ask("Grid cells in y", 32)
     nu = ask("Viscosity (nu)", 0.01)
@@ -73,8 +70,6 @@ def main():
     top_u = ask("Lid speed", 1.0)
     smooth_lid = input("  Use smooth lid profile? (y/n) [y]: ").strip().lower() != "n"
 
-    # Compute a sensible default simulation time based on flow parameters.
-    # Steady state roughly requires max(10, 0.1*Re) convective time units (L/U).
     Re = abs(top_u) * 1.0 / max(nu, 1e-10)
     t_conv = 1.0 / max(abs(top_u), 1e-10)
     default_time = t_conv * min(max(10.0, 0.1 * Re), 200.0)
@@ -94,7 +89,6 @@ def main():
         handle_error(exc)
 
     try:
-        # Initialize and run the solver
         s = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt,
             lid_speed=top_u, smooth_lid=smooth_lid,
@@ -109,19 +103,21 @@ def main():
         print("  Reduce dt (or lid speed), then try again.")
         raise SystemExit(1)
 
-    # Prepare output directory
     project_root = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(project_root, "output")
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Save the visualization
+
     out_path = os.path.join(output_dir, "result.png")
     save_contour(s.mesh, s.u, s.v, s.p, out_path)
 
     print()
     print(f"  Result saved to {out_path}")
 
-    # Attempt to automatically open the generated image
+    _open_image(out_path)
+
+
+def _open_image(out_path):
+    """Attempt to open an image file with the system viewer."""
     opened = False
     if sys.platform == "darwin":
         subprocess.run(["open", out_path], check=False)
@@ -144,6 +140,57 @@ def main():
 
     if not opened:
         print(f"  Open output/result.png to view the result.")
+
+
+def main():
+    """Main entry point for the interactive CFD solver."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+        from cfd_solver.version_check import check_for_updates
+        check_for_updates(repo_dir=os.path.dirname(__file__) or ".")
+    except Exception:
+        pass
+
+    try:
+        from cfd_solver import __version__
+        version_str = __version__
+    except Exception:
+        version_str = "unknown"
+
+    print()
+    print("========================================")
+    print("  CFD Solver — Interactive Setup")
+    print("========================================")
+    print(f"  Version: {version_str}")
+    print()
+    print("  Select an example to run:")
+    print()
+    print("    1) Lid-Driven Cavity  — classic benchmark")
+    print("    2) Couette Flow       — parallel plates, periodic x")
+    print("    3) Taylor-Green Vortex — decaying vortex, analytical")
+    print("    4) Channel Flow       — Poiseuille (inlet or body force)")
+    print("    5) Custom Setup       — configure parameters manually")
+    print("    0) Quit")
+    print()
+
+    choice = input("  Choice [1]: ").strip() or "1"
+
+    examples = {
+        "1": "cavity",
+        "2": "couette",
+        "3": "taylor_green",
+        "4": "channel",
+    }
+
+    if choice == "0":
+        return
+    elif choice in examples:
+        run_example(examples[choice])
+    elif choice == "5":
+        run_custom()
+    else:
+        print(f"  Unknown choice: {choice}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
