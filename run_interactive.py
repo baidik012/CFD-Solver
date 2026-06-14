@@ -9,10 +9,39 @@ parameters, executes the simulation, and displays the result.
 import os
 import sys
 import subprocess
+import tempfile
 
 import yaml
 
 from cfd_solver.utils import handle_error
+
+
+EXAMPLE_SCRIPTS = {
+    "cavity": "examples/cavity/run.py",
+    "couette": "examples/couette/run.py",
+    "taylor_green": "examples/taylor_green/run.py",
+    "channel": "examples/channel_flow/run.py",
+}
+
+EXAMPLE_DEFAULTS = {
+    "cavity": {
+        "Nx": 64, "Ny": 64, "nu": 0.01, "dt": 0.001,
+        "simulation_time": 20.0, "Lx": 1.0, "Ly": 1.0,
+        "lid_speed": 1.0, "smooth_lid": True,
+    },
+    "couette": {
+        "Nx": 32, "Ny": 64, "nu": 0.01, "dt": 0.001,
+        "simulation_time": 10.0, "Lx": 1.0, "Ly": 1.0,
+    },
+    "taylor_green": {
+        "Nx": 64, "Ny": 64, "nu": 0.01, "dt": 0.001,
+        "simulation_time": 2.0, "Lx": 6.283185307, "Ly": 6.283185307,
+    },
+    "channel": {
+        "Nx": 128, "Ny": 32, "nu": 0.01, "dt": 0.0005,
+        "simulation_time": 10.0, "Lx": 10.0, "Ly": 1.0,
+    },
+}
 
 
 def ask(prompt, default):
@@ -35,6 +64,114 @@ def ask(prompt, default):
     return type(default)(val) if val else default
 
 
+def _make_config(example, params):
+    """Build a config dict for the given example from user parameters.
+
+    Parameters
+    ----------
+    example : str
+        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
+    params : dict
+        User-specified parameters (Nx, Ny, nu, dt, simulation_time, etc.).
+
+    Returns
+    -------
+    dict
+        A config dict suitable for writing to YAML.
+    """
+    geo = {
+        "Nx": params["Nx"],
+        "Ny": params["Ny"],
+        "Lx": params["Lx"],
+        "Ly": params["Ly"],
+    }
+
+    cfg = {
+        "geometry": geo,
+        "nu": params["nu"],
+        "dt": params["dt"],
+        "simulation_time": params["simulation_time"],
+    }
+
+    if example == "cavity":
+        cfg["boundary"] = {
+            "top": {"u": params["lid_speed"], "v": 0.0},
+            "other": {"u": 0.0, "v": 0.0},
+        }
+        cfg["smooth_lid"] = params.get("smooth_lid", True)
+    elif example == "couette":
+        cfg["boundary"] = {
+            "top": {"type": "wall", "u": 1.0, "v": 0.0},
+            "bottom": {"type": "wall", "u": 0.0, "v": 0.0},
+            "left": {"type": "periodic"},
+            "right": {"type": "periodic"},
+        }
+    elif example == "taylor_green":
+        cfg["boundary"] = {
+            "top": {"type": "free_slip", "u": 0.0},
+            "bottom": {"type": "free_slip", "u": 0.0},
+            "left": {"type": "periodic"},
+            "right": {"type": "periodic"},
+        }
+    elif example == "channel":
+        variant = params.get("variant", "inlet")
+        if variant == "inlet":
+            cfg["boundary"] = {
+                "left": {"type": "inlet", "profile": "parabolic", "U_max": 1.0},
+                "right": {"type": "outlet", "method": "zero_gradient"},
+                "top": {"type": "wall", "u": 0.0, "v": 0.0},
+                "bottom": {"type": "wall", "u": 0.0, "v": 0.0},
+            }
+        else:
+            cfg["body_force"] = {"u": 8.0, "v": 0.0}
+            cfg["boundary"] = {
+                "top": {"type": "wall", "u": 0.0, "v": 0.0},
+                "bottom": {"type": "wall", "u": 0.0, "v": 0.0},
+                "left": {"type": "wall", "u": 0.0, "v": 0.0},
+                "right": {"type": "wall", "u": 0.0, "v": 0.0},
+            }
+
+    return cfg
+
+
+def _prompt_params(example):
+    """Prompt user for parameters for a given example.
+
+    Parameters
+    ----------
+    example : str
+        Example name.
+
+    Returns
+    -------
+    dict
+        User-specified parameters.
+    """
+    defaults = EXAMPLE_DEFAULTS[example]
+    params = {}
+
+    print(f"\n  Configure {example.replace('_', ' ').title()}")
+    print("  Press Enter to accept defaults in [brackets].\n")
+
+    params["Nx"] = ask("Grid cells in x", defaults["Nx"])
+    params["Ny"] = ask("Grid cells in y", defaults["Ny"])
+    params["nu"] = ask("Viscosity (nu)", defaults["nu"])
+    params["dt"] = ask("Time step (dt)", defaults["dt"])
+    params["simulation_time"] = ask("Simulation time (s)", defaults["simulation_time"])
+    params["Lx"] = ask("Domain length Lx", defaults["Lx"])
+    params["Ly"] = ask("Domain height Ly", defaults["Ly"])
+
+    if example == "cavity":
+        params["lid_speed"] = ask("Lid speed", defaults["lid_speed"])
+        smooth = input("  Use smooth lid profile? (y/n) [y]: ").strip().lower()
+        params["smooth_lid"] = smooth != "n"
+    elif example == "channel":
+        variant = input("  Variant (inlet / body-force) [inlet]: ").strip() or "inlet"
+        params["variant"] = variant
+
+    return params
+
+
 def run_example(example):
     """Run a bundled example from the examples/ directory.
 
@@ -44,18 +181,41 @@ def run_example(example):
         Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    examples = {
-        "cavity": "examples/cavity/run.py",
-        "couette": "examples/couette/run.py",
-        "taylor_green": "examples/taylor_green/run.py",
-        "channel": "examples/channel_flow/run.py",
-    }
-
-    script_path = os.path.join(script_dir, examples[example])
-    print(f"  Running {example} example...")
+    script_path = os.path.join(script_dir, EXAMPLE_SCRIPTS[example])
+    print(f"  Running {example.replace('_', ' ').title()} (defaults)...")
     print()
     subprocess.run([sys.executable, script_path], check=False)
+
+
+def run_custom_example(example):
+    """Prompt for parameters, write temp config, and run the example.
+
+    Parameters
+    ----------
+    example : str
+        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
+    """
+    params = _prompt_params(example)
+    cfg = _make_config(example, params)
+
+    # Write temp config
+    suffix = f"_{example}_custom.yaml"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="cfd_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(script_dir, EXAMPLE_SCRIPTS[example])
+
+        print()
+        label = example.replace("_", " ").title()
+        print(f"  Running {label}...")
+        print()
+        subprocess.run([sys.executable, script_path, "--config", tmp_path], check=False)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def run_custom():
@@ -165,29 +325,30 @@ def main():
     print()
     print("  Select an example to run:")
     print()
-    print("    1) Lid-Driven Cavity  — classic benchmark")
-    print("    2) Couette Flow       — parallel plates, periodic x")
-    print("    3) Taylor-Green Vortex — decaying vortex, analytical")
-    print("    4) Channel Flow       — Poiseuille (inlet or body force)")
-    print("    5) Custom Cavity      — configure cavity parameters manually")
+    print("    1) Cavity (defaults)        — lid-driven benchmark")
+    print("    2) Couette (defaults)       — parallel plates, periodic x")
+    print("    3) Taylor-Green (defaults)  — decaying vortex, analytical")
+    print("    4) Channel (defaults)       — Poiseuille (inlet or body force)")
+    print()
+    print("    5) Custom Cavity            — set grid, viscosity, time, etc.")
+    print("    6) Custom Couette           — set grid, viscosity, time, etc.")
+    print("    7) Custom Taylor-Green      — set grid, viscosity, time, etc.")
+    print("    8) Custom Channel           — set grid, viscosity, time, etc.")
+    print()
     print("    0) Quit")
     print()
 
     choice = input("  Choice [1]: ").strip() or "1"
 
-    examples = {
-        "1": "cavity",
-        "2": "couette",
-        "3": "taylor_green",
-        "4": "channel",
-    }
+    simple = {"1": "cavity", "2": "couette", "3": "taylor_green", "4": "channel"}
+    custom = {"5": "cavity", "6": "couette", "7": "taylor_green", "8": "channel"}
 
     if choice == "0":
         return
-    elif choice in examples:
-        run_example(examples[choice])
-    elif choice == "5":
-        run_custom()
+    elif choice in simple:
+        run_example(simple[choice])
+    elif choice in custom:
+        run_custom_example(custom[choice])
     else:
         print(f"  Unknown choice: {choice}")
         raise SystemExit(1)

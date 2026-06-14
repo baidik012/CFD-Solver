@@ -10,6 +10,7 @@ where kx = 2*pi/Lx, ky = 2*pi/Ly, d = nu * (kx^2 + ky^2).
 
 import os
 import sys
+import argparse
 import numpy as np
 import yaml
 
@@ -47,8 +48,14 @@ def taylor_green_ic(mesh):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Taylor-Green vortex")
+    parser.add_argument("--config", "-c", default=None,
+                        help="Path to config YAML (default: examples/taylor_green/config.yaml)")
+    parser.add_argument("--output", "-o", default=None)
+    args = parser.parse_args()
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
+    config_path = args.config or os.path.join(script_dir, "config.yaml")
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
@@ -89,12 +96,15 @@ def main():
     l2 = np.sqrt(np.mean((u_num - u_exact)**2))
     print(f"\n  L2 error in u at t={s.time:.3f}: {l2:.6e}")
 
-    out_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-    os.makedirs(out_dir, exist_ok=True)
-    s.save(os.path.join(out_dir, "taylor_green_result.png"))
-    s.save_streamlines(os.path.join(out_dir, "taylor_green_streamlines.png"))
-    s.checkpoint(os.path.join(out_dir, "taylor_green.npz"))
-    print(f"  Saved to {out_dir}/taylor_green_result.png")
+    if args.output:
+        out = args.output
+    else:
+        out_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, "taylor_green_result.png")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    s.save(out)
+    print(f"  Saved to {out}")
 
 
 if __name__ == "__main__":

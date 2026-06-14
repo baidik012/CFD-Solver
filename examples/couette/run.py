@@ -91,11 +91,13 @@ def run_couette(cfg, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Couette flow")
+    parser.add_argument("--config", "-c", default=None,
+                        help="Path to config YAML (default: examples/couette/config.yaml)")
     parser.add_argument("--output", "-o", default=None)
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
+    config_path = args.config or os.path.join(script_dir, "config.yaml")
 
     with open(config_path) as f:
         cfg = yaml.safe_load(f)

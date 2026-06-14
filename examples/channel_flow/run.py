@@ -114,11 +114,15 @@ def run_body_force(cfg, output_path):
 def main():
     parser = argparse.ArgumentParser(description="Channel flow")
     parser.add_argument("--variant", choices=["inlet", "body-force"], default="inlet")
+    parser.add_argument("--config", "-c", default=None,
+                        help="Path to config YAML (overrides --variant)")
     parser.add_argument("--output", "-o", default=None)
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    if args.variant == "inlet":
+    if args.config:
+        config_path = args.config
+    elif args.variant == "inlet":
         config_path = os.path.join(script_dir, "config_inlet.yaml")
     else:
         config_path = os.path.join(script_dir, "config_body_force.yaml")
