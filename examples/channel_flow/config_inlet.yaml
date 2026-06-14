@@ -1,12 +1,12 @@
 geometry:
-  Lx: 5.0
+  Lx: 10.0
   Ly: 1.0
   Nx: 128
   Ny: 32
 
 nu: 0.01
-dt: 0.001
-simulation_time: 5.0
+dt: 0.0005
+simulation_time: 10.0
 
 boundary:
   left:

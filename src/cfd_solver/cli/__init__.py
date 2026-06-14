@@ -242,6 +242,33 @@ def run(args):
     print(f"Saved to {args.output}")
 
 
+def run_example(args):
+    """Run a bundled example by name."""
+    import importlib
+    name = args.name
+    script_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "examples", name)
+    script_dir = os.path.normpath(script_dir)
+
+    if not os.path.isdir(script_dir):
+        print(f"Error: example '{name}' not found at {script_dir}", file=sys.stderr)
+        raise SystemExit(1)
+
+    run_py = os.path.join(script_dir, "run.py")
+    if not os.path.exists(run_py):
+        print(f"Error: no run.py in example '{name}'", file=sys.stderr)
+        raise SystemExit(1)
+
+    cmd_args = []
+    if args.output:
+        cmd_args.extend(["--output", args.output])
+    if args.variant:
+        cmd_args.extend(["--variant", args.variant])
+
+    sys.argv = [run_py] + cmd_args
+    import runpy
+    runpy.run_path(run_py, run_name="__main__")
+
+
 def main():
     """
     Main entry point for the CLI.
@@ -268,6 +295,21 @@ def main():
         help="Resume from a .npz checkpoint file instead of starting fresh",
     )
     run_parser.set_defaults(func=run)
+
+    # 'run-example' subcommand
+    example_parser = sub.add_parser("run-example", help="Run a bundled example")
+    example_parser.add_argument(
+        "name", help="Example name (cavity, channel_flow, couette, taylor_green)",
+    )
+    example_parser.add_argument(
+        "--output", "-o", default=None,
+        help="Output plot path (default: output/<name>/result.png)",
+    )
+    example_parser.add_argument(
+        "--variant", default=None,
+        help="Example variant (e.g. 'inlet' or 'body-force' for channel_flow)",
+    )
+    example_parser.set_defaults(func=run_example)
 
     args = parser.parse_args()
     try:

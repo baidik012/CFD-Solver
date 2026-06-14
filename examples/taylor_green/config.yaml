@@ -1,0 +1,15 @@
+geometry:
+  Lx: 6.283185307
+  Ly: 6.283185307
+  Nx: 64
+  Ny: 64
+
+nu: 0.01
+dt: 0.001
+simulation_time: 1.0
+
+boundary:
+  top: {type: wall, u: 0.0, v: 0.0}
+  bottom: {type: wall, u: 0.0, v: 0.0}
+  left: {type: wall, u: 0.0, v: 0.0}
+  right: {type: wall, u: 0.0, v: 0.0}

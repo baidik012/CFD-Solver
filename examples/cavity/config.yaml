@@ -1,0 +1,13 @@
+geometry:
+  Lx: 1.0
+  Ly: 1.0
+  Nx: 64
+  Ny: 64
+
+nu: 0.01
+dt: 0.001
+simulation_time: 20.0
+
+boundary:
+  top: {u: 1.0, v: 0.0}
+  other: {u: 0.0, v: 0.0}
