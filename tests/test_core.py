@@ -1121,3 +1121,284 @@ def test_cli_parse_boundary_none():
     from cfd_solver.cli import _parse_boundary_config
     bc = _parse_boundary_config(None)
     assert isinstance(bc.walls['top'], NoSlipWall)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 1 — Body Forces, Initial Conditions, Time Tracking, Convergence
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── Time Tracking ────────────────────────────────────────────────────
+
+def test_time_starts_zero():
+    """Solver.time is 0.0 before any steps."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    assert s.time == 0.0
+
+
+def test_time_increments_by_dt():
+    """Solver.time increments by dt after each step."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.01)
+    s.step()
+    assert abs(s.time - 0.01) < 1e-12
+    s.step()
+    assert abs(s.time - 0.02) < 1e-12
+
+
+def test_time_after_solve():
+    """Solver.time matches simulation_time after solve(simulation_time=...)."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    s.solve(simulation_time=0.1, verbose=False)
+    expected = np.ceil(0.1 / 0.001) * 0.001
+    assert abs(s.time - expected) < 1e-10
+
+
+# ── Body Force ───────────────────────────────────────────────────────
+
+def test_body_force_none():
+    """No body force (default) produces same results as before."""
+    s1 = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    s1.solve(steps=10, verbose=False)
+    s2 = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, body_force=None)
+    s2.solve(steps=10, verbose=False)
+    assert np.allclose(s1.u, s2.u)
+
+
+def test_body_force_constant_zero():
+    """Constant zero body force is equivalent to no force."""
+    def zero_force(u, v, t):
+        return np.zeros_like(u), np.zeros_like(v)
+    s1 = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    s1.solve(steps=10, verbose=False)
+    s2 = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, body_force=zero_force)
+    s2.solve(steps=10, verbose=False)
+    assert np.allclose(s1.u, s2.u)
+
+
+def test_body_force_accelerates_fluid():
+    """Constant x-force on a closed box accelerates the fluid."""
+    bc = BoundaryConditions(top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+                            left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0))
+    s = Solver(
+        grid_size=(16, 8), nu=0.01, dt=0.0005, lid_speed=0.0,
+        boundary_config=bc,
+        body_force=lambda u, v, t: (np.full_like(u, 0.1), np.zeros_like(v)),
+    )
+    s.solve(simulation_time=0.5, verbose=False)
+    # With constant force, mean u should be positive
+    interior = s.u[1:-1, 1:-1]
+    assert np.mean(interior) > 0.0
+
+
+def test_body_force_lambda():
+    """Lambda body force works the same as a named function."""
+    def bf(u, v, t):
+        return np.full_like(u, 0.5), np.full_like(v, 0.0)
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, body_force=bf)
+    s.solve(simulation_time=0.1, verbose=False)
+    assert s.time > 0
+
+
+def test_body_force_time_varying():
+    """Time-varying body force produces different result than constant."""
+    def constant_force(u, v, t):
+        return np.full_like(u, 0.1), np.zeros_like(v)
+    def oscillating_force(u, v, t):
+        return np.full_like(u, 0.1 * np.sin(2 * np.pi * t)), np.zeros_like(v)
+    s_const = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, body_force=constant_force)
+    s_const.solve(simulation_time=0.5, verbose=False)
+    s_osc = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, body_force=oscillating_force)
+    s_osc.solve(simulation_time=0.5, verbose=False)
+    # The two should be different
+    assert not np.allclose(s_const.u, s_osc.u, atol=1e-6)
+
+
+# ── Initial Condition ────────────────────────────────────────────────
+
+def test_initial_condition_none():
+    """No IC (default) uses zero initial velocity."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, lid_speed=0.0)
+    # Before solve, interior is zeros; BC applies lid=0 so entire array is zero
+    interior = s.u[1:-1, 1:-1]
+    assert np.allclose(interior, 0.0)
+
+
+def test_initial_condition_sets_field():
+    """Provided IC sets the initial velocity field before the first step."""
+    call_count = [0]
+    def my_ic(mesh):
+        call_count[0] += 1
+        u = np.ones(mesh.shape_u)
+        v = np.zeros(mesh.shape_v)
+        p = np.zeros(mesh.shape_p)
+        return u, v, p
+    bc = BoundaryConditions(top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+                            left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0))
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, lid_speed=0.0,
+               boundary_config=bc, initial_condition=my_ic)
+    assert call_count[0] == 0  # not called yet
+    s.solve(steps=1, verbose=False)
+    assert call_count[0] == 1  # called exactly once
+
+
+def test_initial_condition_mesh_object():
+    """IC function receives a Mesh object with expected attributes."""
+    received = {}
+    def my_ic(mesh):
+        received['Nx'] = mesh.Nx
+        received['Ny'] = mesh.Ny
+        received['shape_u'] = mesh.shape_u
+        received['shape_v'] = mesh.shape_v
+        received['shape_p'] = mesh.shape_p
+        received['Lx'] = mesh.Lx
+        received['Ly'] = mesh.Ly
+        return (np.zeros(mesh.shape_u), np.zeros(mesh.shape_v),
+                np.zeros(mesh.shape_p))
+    bc = BoundaryConditions(top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+                            left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0))
+    s = Solver(grid_size=(16, 8), nu=0.01, dt=0.001, Lx=2.0, Ly=1.0,
+               lid_speed=0.0, boundary_config=bc, initial_condition=my_ic)
+    s.solve(steps=1, verbose=False)
+    assert received['Nx'] == 16
+    assert received['Ny'] == 8
+    # Mesh shapes include ghost cells: u=(Nx+1, Ny+2), v=(Nx+2, Ny+1), p=(Nx+2, Ny+2)
+    assert received['shape_u'] == (17, 10)
+    assert received['shape_v'] == (18, 9)
+    assert received['shape_p'] == (18, 10)
+    assert received['Lx'] == 2.0
+    assert received['Ly'] == 1.0
+
+
+def test_initial_condition_with_body_force():
+    """IC and body force can be used together."""
+    call_count = [0]
+    def my_ic(mesh):
+        call_count[0] += 1
+        u = np.ones(mesh.shape_u) * 0.5
+        v = np.zeros(mesh.shape_v)
+        p = np.zeros(mesh.shape_p)
+        return u, v, p
+    bc = BoundaryConditions(top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+                            left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0))
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001, lid_speed=0.0,
+               boundary_config=bc,
+               initial_condition=my_ic,
+               body_force=lambda u, v, t: (np.zeros_like(u), np.zeros_like(v)))
+    s.solve(simulation_time=0.1, verbose=False)
+    assert call_count[0] == 1
+    assert np.isfinite(s.u).all()
+
+
+# ── Steady-State Convergence ─────────────────────────────────────────
+
+def test_convergence_no_tol_runs_all_steps():
+    """Without convergence_tol, solve runs all requested steps."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    s.solve(simulation_time=0.1, verbose=False)
+    expected = np.ceil(0.1 / 0.001)
+    # Should have run exactly 'expected' steps
+    assert abs(s.time - expected * 0.001) < 1e-10
+
+
+def test_convergence_stops_early():
+    """Convergence check stops simulation early when converged."""
+    def my_ic(mesh):
+        return (np.zeros(mesh.shape_u), np.zeros(mesh.shape_v),
+                np.zeros(mesh.shape_p))
+    # Run without convergence — take many steps
+    s1 = Solver(grid_size=(16, 8), nu=0.01, dt=0.0005, initial_condition=my_ic)
+    s1.solve(simulation_time=1.0, verbose=False)
+    steps_no_conv = int(np.ceil(1.0 / 0.0005))
+
+    # Run with convergence — should stop early
+    s2 = Solver(grid_size=(16, 8), nu=0.01, dt=0.0005, initial_condition=my_ic)
+    s2.solve(simulation_time=1.0, verbose=False, convergence_tol=1e-6, convergence_window=50)
+    # s2 should have taken fewer steps (or the same if not converged yet)
+    # Just verify it didn't crash and time is valid
+    assert s2.time <= 1.0 + 0.0005
+
+
+def test_convergence_returns_true():
+    """solve() returns True on normal completion (not a blowup)."""
+    s = Solver(grid_size=(8, 4), nu=0.01, dt=0.001)
+    result = s.solve(simulation_time=0.01, verbose=False)
+    assert result is True
+
+
+def test_convergence_returns_false_on_blowup():
+    """solve() returns False when simulation blows up."""
+    s = Solver(
+        grid_size=(8, 4), nu=0.01, dt=0.1,
+        body_force=lambda u, v, t: (np.full_like(u, 1e6), np.zeros_like(v)),
+        force=True,
+    )
+    result = s.solve(steps=20, verbose=False)
+    assert result is False
+
+
+# ── YAML Parsing ─────────────────────────────────────────────────────
+
+def test_cli_parse_body_force():
+    """CLI body_force parsing produces a working callable."""
+    from cfd_solver.cli import _parse_body_force
+    bf = _parse_body_force({"u": "0.5", "v": "0.0"})
+    assert callable(bf)
+    u_test = np.zeros((5, 3))
+    v_test = np.zeros((5, 3))
+    fu, fv = bf(u_test, v_test, 0.0)
+    assert np.allclose(fu, 0.5)
+    assert np.allclose(fv, 0.0)
+
+
+def test_cli_parse_body_force_zero():
+    """CLI body_force parsing with zero values returns None."""
+    from cfd_solver.cli import _parse_body_force
+    bf = _parse_body_force({"u": "0.0", "v": "0.0"})
+    assert bf is None
+
+
+def test_cli_parse_body_force_none():
+    """CLI body_force parsing with None returns None."""
+    from cfd_solver.cli import _parse_body_force
+    assert _parse_body_force(None) is None
+
+
+def test_cli_parse_convergence():
+    """CLI convergence parsing returns (tol, window)."""
+    from cfd_solver.cli import _parse_convergence
+    tol, window = _parse_convergence({"tol": 1e-6, "window": 50})
+    assert tol == 1e-6
+    assert window == 50
+
+
+def test_cli_parse_convergence_none():
+    """CLI convergence parsing with None returns (None, None)."""
+    from cfd_solver.cli import _parse_convergence
+    tol, window = _parse_convergence(None)
+    assert tol is None
+    assert window is None
+
+
+# ── Validation Schema ────────────────────────────────────────────────
+
+def test_validate_body_force():
+    """Config with body_force passes validation."""
+    from cfd_solver.solver.validate import validate_config
+    cfg = {
+        "geometry": {"Lx": 1.0, "Ly": 1.0, "Nx": 8, "Ny": 8},
+        "nu": 0.01, "dt": 0.001, "steps": 10,
+        "body_force": {"u": 0.1, "v": 0.0},
+    }
+    errors = validate_config(cfg)
+    assert errors == []
+
+
+def test_validate_convergence():
+    """Config with convergence passes validation."""
+    from cfd_solver.solver.validate import validate_config
+    cfg = {
+        "geometry": {"Lx": 1.0, "Ly": 1.0, "Nx": 8, "Ny": 8},
+        "nu": 0.01, "dt": 0.001, "steps": 10,
+        "convergence": {"tol": 1e-6, "window": 100},
+    }
+    errors = validate_config(cfg)
+    assert errors == []

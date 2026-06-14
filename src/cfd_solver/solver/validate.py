@@ -89,6 +89,20 @@ _SCHEMA = {
     },
     "advection_scheme": {"type": str, "values": ["upwind", "central"]},
     "diffusion_scheme": {"type": str, "values": ["crank_nicolson", "explicit"]},
+    "body_force": {
+        "type": dict,
+        "fields": {
+            "u": {"type": (int, float, str)},
+            "v": {"type": (int, float, str)},
+        },
+    },
+    "convergence": {
+        "type": dict,
+        "fields": {
+            "tol": {"type": (int, float), "min": 0, "exclusive_min": True},
+            "window": {"type": int, "min": 1},
+        },
+    },
 }
 
 

@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import yaml
+import numpy as np
 from cfd_solver.solver import Solver
 from cfd_solver.solver.bc import (
     BoundaryConditions, NoSlipWall, FreeSlipWall,
@@ -102,6 +103,26 @@ def _parse_boundary_config(bc_cfg):
     return BoundaryConditions(top=top_u, smooth_lid=smooth_lid)
 
 
+def _parse_body_force(bf_cfg):
+    if bf_cfg is None:
+        return None
+    fu_val = float(bf_cfg.get('u', 0.0))
+    fv_val = float(bf_cfg.get('v', 0.0))
+    if fu_val == 0.0 and fv_val == 0.0:
+        return None
+    def bf(u, v, t):
+        return (np.full_like(u, fu_val), np.full_like(v, fv_val))
+    return bf
+
+
+def _parse_convergence(conv_cfg):
+    if conv_cfg is None:
+        return None, None
+    tol = conv_cfg.get('tol')
+    window = conv_cfg.get('window', 100)
+    return tol, window
+
+
 def run(args):
     """
     Execute the simulation based on command-line arguments.
@@ -148,6 +169,9 @@ def run(args):
         advection_scheme = cfg.get("advection_scheme", "upwind")
         diffusion_scheme = cfg.get("diffusion_scheme", "crank_nicolson")
 
+        # Parse body force
+        body_force = _parse_body_force(cfg.get("body_force"))
+
         # Parse boundary conditions (supports both legacy and new per-wall format)
         bc = _parse_boundary_config(bc_cfg)
 
@@ -176,11 +200,13 @@ def run(args):
             advection_scheme=advection_scheme,
             diffusion_scheme=diffusion_scheme,
             boundary_config=bc,
+            body_force=body_force,
         )
 
     # Simulation loop — prefer simulation_time over steps
     sim_time = cfg.get("simulation_time")
     steps = cfg.get("steps")
+    conv_tol, conv_window = _parse_convergence(cfg.get("convergence"))
     if sim_time is None and steps is None:
         # Auto-compute from flow parameters: max(10, 0.1*Re) convective time units
         nu_val = cfg.get("nu", 0.01)
@@ -195,9 +221,11 @@ def run(args):
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
     if sim_time is not None:
-        ok = solver.solve(simulation_time=sim_time, verbose=True)
+        ok = solver.solve(simulation_time=sim_time, verbose=True,
+                          convergence_tol=conv_tol, convergence_window=conv_window)
     else:
-        ok = solver.solve(steps, verbose=True)
+        ok = solver.solve(steps, verbose=True,
+                          convergence_tol=conv_tol, convergence_window=conv_window)
 
     if not ok:
         print(

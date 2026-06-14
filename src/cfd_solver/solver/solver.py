@@ -90,7 +90,9 @@ class Solver:
     def __init__(self, grid_size, nu, dt, lid_speed=1.0, smooth_lid=True,
                  advection_scheme="upwind", diffusion_scheme="crank_nicolson",
                  Lx=1.0, Ly=1.0, force=False,
-                 boundary_config=None):
+                 boundary_config=None,
+                 body_force=None,
+                 initial_condition=None):
         # --- Input Validation ---
         Nx, Ny = grid_size
         if Nx < 2 or Ny < 2:
@@ -183,6 +185,9 @@ class Solver:
 
         self.dt = dt
         self.nu = nu
+        self.time = 0.0
+        self._body_force_fn = body_force
+        self._initial_condition_fn = initial_condition
         self.advection_scheme = advection_scheme
         self.diffusion_scheme = diffusion_scheme
 
@@ -285,6 +290,12 @@ class Solver:
                 self.nu, self.bc, Nx, Ny,
             )
 
+        # Body force: add external forces to intermediate velocity
+        if self._body_force_fn is not None:
+            fu, fv = self._body_force_fn(self.u, self.v, self.time)
+            u_star += dt * fu
+            v_star += dt * fv
+
         # 2. Pressure Step: Solve ∇²p = (∇·u*) / dt
         self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
@@ -299,7 +310,11 @@ class Solver:
         # Finalize BCs for the new velocity field
         self.bc.apply(self.u, self.v, Nx, Ny)
 
-    def solve(self, steps=None, verbose=True, simulation_time=None):
+        # Advance physical time
+        self.time += dt
+
+    def solve(self, steps=None, verbose=True, simulation_time=None,
+              convergence_tol=None, convergence_window=100):
         """Run the simulation.
 
         Either ``steps`` or ``simulation_time`` must be provided.  When
@@ -317,6 +332,12 @@ class Solver:
         simulation_time : float, optional
             Physical time (in seconds) to simulate.  When set, overrides
             ``steps``.
+        convergence_tol : float, optional
+            If set, stop early when max|u^{n+1} - u^n| < convergence_tol
+            for ``convergence_window`` consecutive steps.
+        convergence_window : int, optional
+            Number of consecutive steps below tolerance before declaring
+            convergence (default 100).
 
         Returns
         -------
@@ -333,9 +354,16 @@ class Solver:
         if steps > 1_000_000:
             print(f"  [warning] Requesting {steps:,} steps. This may take a long time.", file=sys.stderr)
         
+        # Apply initial condition if provided
+        if self._initial_condition_fn is not None:
+            self.u[:], self.v[:], self.p[:] = self._initial_condition_fn(self.mesh)
+            self.bc.apply(self.u, self.v, self.Nx, self.Ny)
+
         t0 = time.time()
         div = 0.0
         c = 0.0
+        converged_count = 0
+        u_old = self.u.copy() if convergence_tol is not None else None
         for i in range(steps):
             self.step()
 
@@ -356,6 +384,23 @@ class Solver:
                         f"smaller lid_speed, or smooth_lid=True."
                     )
                 return False
+
+            # Steady-state convergence check
+            if convergence_tol is not None:
+                delta = np.max(np.abs(self.u - u_old))
+                if delta < convergence_tol:
+                    converged_count += 1
+                    if converged_count >= convergence_window:
+                        if verbose:
+                            sys.stdout.write(
+                                f"\n  Converged at step {i+1}: "
+                                f"max|du|={delta:.2e} < {convergence_tol:.2e} "
+                                f"for {convergence_window} steps\n"
+                            )
+                        return True
+                else:
+                    converged_count = 0
+                u_old[:] = self.u
 
             if verbose:
                 bar_len = 30
