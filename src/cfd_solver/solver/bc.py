@@ -244,7 +244,10 @@ class BoundaryConditions:
         """
         # --- Top wall (j = Ny) ---
         wall = self.walls['top']
-        if isinstance(wall, InletWall):
+        if isinstance(wall, PeriodicWall):
+            # y-periodic: top ghost = bottom interior
+            u[:, -1] = u[:, 1]
+        elif isinstance(wall, InletWall):
             # Normal velocity (v) at top face
             v[1:-1, Ny] = self._inlet_profile(wall, Ny, axis='y')
             # Tangential u: ghost-cell Dirichlet
@@ -265,7 +268,11 @@ class BoundaryConditions:
 
         # --- Bottom wall (j = 0) ---
         wall = self.walls['bottom']
-        if isinstance(wall, InletWall):
+        if isinstance(wall, PeriodicWall):
+            # y-periodic: bottom ghost = top interior
+            u[:, 0] = u[:, Ny]
+            v[1:-1, 0] = v[1:-1, Ny]
+        elif isinstance(wall, InletWall):
             v[1:-1, 0] = self._inlet_profile(wall, Ny, axis='y')
             u[:, 0] = 2.0 * 0.0 - u[:, 1]
         elif isinstance(wall, OutletWall):
@@ -280,7 +287,11 @@ class BoundaryConditions:
 
         # --- Left wall (i = 0) ---
         wall = self.walls['left']
-        if isinstance(wall, InletWall):
+        if isinstance(wall, PeriodicWall):
+            # x-periodic: left ghost = right interior
+            v[0, :] = v[Nx, :]
+            u[0, 1:-1] = u[Nx, 1:-1]
+        elif isinstance(wall, InletWall):
             u[0, 1:-1] = self._inlet_profile(wall, Ny, axis='x')
             v[0, :] = 2.0 * 0.0 - v[1, :]
         elif isinstance(wall, OutletWall):
@@ -295,7 +306,11 @@ class BoundaryConditions:
 
         # --- Right wall (i = Nx) ---
         wall = self.walls['right']
-        if isinstance(wall, InletWall):
+        if isinstance(wall, PeriodicWall):
+            # x-periodic: right ghost = left interior
+            v[-1, :] = v[1, :]
+            u[Nx, 1:-1] = u[0, 1:-1]
+        elif isinstance(wall, InletWall):
             u[Nx, 1:-1] = self._inlet_profile(wall, Ny, axis='x')
             v[-1, :] = 2.0 * 0.0 - v[-2, :]
         elif isinstance(wall, OutletWall):

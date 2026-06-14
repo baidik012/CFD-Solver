@@ -36,7 +36,7 @@ import time
 import numpy as np
 
 from .mesh import Mesh
-from .bc import BoundaryConditions, NoSlipWall, OutletWall, InletWall, FreeSlipWall
+from .bc import BoundaryConditions, NoSlipWall, OutletWall, InletWall, FreeSlipWall, PeriodicWall
 from . import advection
 from .diffusion import CrankNicolson, create_diffusion_solver
 from .pressure import create_pressure_solver
@@ -191,6 +191,9 @@ class Solver:
         self.advection_scheme = advection_scheme
         self.diffusion_scheme = diffusion_scheme
 
+        # Detect periodic directions
+        self._periodic_x = any(isinstance(w, PeriodicWall) for w in self.bc.walls.values())
+
         # Initialize velocity and pressure arrays
         self.u = np.zeros(self.mesh.shape_u)
         self.v = np.zeros(self.mesh.shape_v)
@@ -296,6 +299,16 @@ class Solver:
             u_star += dt * fu
             v_star += dt * fv
 
+        # Periodic x: the advection/diffusion step doesn't update u_star
+        # at the boundary face (i=0/i=Nx), so we compute the diffusion
+        # contribution there using the wrapping Laplacian.
+        if self._periodic_x:
+            dx2, dy2 = dx**2, dy**2
+            lap_u_0 = (u_star[1, 1:-1] - 2.0 * self.u[0, 1:-1] + u_star[-2, 1:-1]) / dx2 + \
+                      (self.u[0, 2:] - 2.0 * self.u[0, 1:-1] + self.u[0, :-2]) / dy2
+            u_star[0, 1:-1] = self.u[0, 1:-1] + dt * self.nu * lap_u_0
+            u_star[-1, 1:-1] = u_star[0, 1:-1]
+
         # 2. Pressure Step: Solve ∇²p = (∇·u*) / dt
         self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
@@ -306,6 +319,12 @@ class Solver:
 
         self.u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x
         self.v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y
+
+        # Periodic x: update u at the periodic face (i=0 = i=Nx)
+        if self._periodic_x:
+            grad_p_x_per = (self.p[1, 1:-1] - self.p[-2, 1:-1]) / dx
+            self.u[0, 1:-1] = u_star[0, 1:-1] - dt * grad_p_x_per
+            self.u[-1, 1:-1] = self.u[0, 1:-1]
 
         # Finalize BCs for the new velocity field
         self.bc.apply(self.u, self.v, Nx, Ny)

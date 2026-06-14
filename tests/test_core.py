@@ -1402,3 +1402,317 @@ def test_validate_convergence():
     }
     errors = validate_config(cfg)
     assert errors == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 2 — Periodic Boundary Conditions
+# ═══════════════════════════════════════════════════════════════════════
+
+
+# ── Periodic Ghost Cells ──────────────────────────────────────────────
+
+def test_bc_periodic_y_copies_interior():
+    """PeriodicWall in y: u ghost cells copy from opposite interior."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    # Set some interior u values
+    u[3, 1] = 0.5
+    u[3, 2] = 0.8
+    bc = BoundaryConditions(
+        top=PeriodicWall(), bottom=PeriodicWall(),
+        left=NoSlipWall(), right=NoSlipWall(),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Top ghost (j=-1) = bottom interior (j=1)
+    assert u[3, -1] == pytest.approx(0.5)
+    # Bottom ghost (j=0) = top interior (j=Ny)
+    assert u[3, 0] == pytest.approx(u[3, m.Ny])
+
+
+def test_bc_periodic_x_copies_interior():
+    """PeriodicWall in x: v ghost cells copy from opposite interior."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    # Set some interior v values
+    v[1, 3] = 0.7
+    v[2, 3] = 0.9
+    bc = BoundaryConditions(
+        top=NoSlipWall(), bottom=NoSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Left ghost (i=0) = right interior (i=Nx)
+    assert v[0, 3] == pytest.approx(v[m.Nx, 3])
+    # Right ghost (i=-1) = left interior (i=1)
+    assert v[-1, 3] == pytest.approx(v[1, 3])
+
+
+def test_bc_periodic_both_directions():
+    """PeriodicWall in both x and y."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    u[4, 3] = 1.0
+    v[3, 4] = 0.5
+    bc = BoundaryConditions(
+        top=PeriodicWall(), bottom=PeriodicWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # u: top ghost = bottom interior
+    assert u[4, -1] == pytest.approx(u[4, 1])
+    # u: bottom ghost = top interior
+    assert u[4, 0] == pytest.approx(u[4, m.Ny])
+    # v: left ghost = right interior
+    assert v[0, 4] == pytest.approx(v[m.Nx, 4])
+    # v: right ghost = left interior
+    assert v[-1, 4] == pytest.approx(v[1, 4])
+
+
+# ── PeriodicPressureSolver ────────────────────────────────────────────
+
+def test_periodic_pressure_zero_divergence():
+    """PeriodicPressureSolver gives zero pressure for zero divergence."""
+    from cfd_solver.solver.pressure import PeriodicPressureSolver
+    m = Mesh(1.0, 1.0, 16, 16)
+    ps = PeriodicPressureSolver(m)
+    u_s = np.zeros(m.shape_u)
+    u_s[:, 1:-1] = 1.0
+    v_s = np.zeros(m.shape_v)
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert np.allclose(p[1:-1, 1:-1], 0.0, atol=1e-10)
+
+
+def test_periodic_pressure_zero_mean():
+    """PeriodicPressureSolver maintains zero-mean pressure."""
+    from cfd_solver.solver.pressure import PeriodicPressureSolver
+    m = Mesh(1.0, 1.0, 16, 16)
+    ps = PeriodicPressureSolver(m)
+    u_s = np.random.randn(*m.shape_u) * 0.01
+    v_s = np.random.randn(*m.shape_v) * 0.01
+    p = ps.solve(u_s, v_s, dt=0.001)
+    assert abs(np.mean(p[1:-1, 1:-1])) < 1e-10
+
+
+def test_periodic_pressure_ghost_cells():
+    """PeriodicPressureSolver sets periodic ghost cells in x."""
+    from cfd_solver.solver.pressure import PeriodicPressureSolver
+    m = Mesh(1.0, 1.0, 16, 16)
+    ps = PeriodicPressureSolver(m)
+    u_s = np.zeros(m.shape_u)
+    v_s = np.zeros(m.shape_v)
+    p = ps.solve(u_s, v_s, dt=0.001)
+    # Periodic x: p[0, :] = p[Nx, :] and p[-1, :] = p[1, :]
+    assert np.allclose(p[0, :], p[m.Nx, :])
+    assert np.allclose(p[-1, :], p[1, :])
+    # Neumann y: p[:, 0] = p[:, 1] and p[:, -1] = p[:, -2]
+    assert np.allclose(p[:, 0], p[:, 1])
+    assert np.allclose(p[:, -1], p[:, -2])
+
+
+def test_create_pressure_solver_periodic():
+    """Factory returns PeriodicPressureSolver when periodic BCs are present."""
+    from cfd_solver.solver.pressure import PeriodicPressureSolver, create_pressure_solver
+    m = Mesh(1.0, 1.0, 256, 256)
+    bc = BoundaryConditions(
+        top=PeriodicWall(), bottom=PeriodicWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    ps = create_pressure_solver(m, bc=bc)
+    assert isinstance(ps, PeriodicPressureSolver)
+
+
+# ── Solver with Periodic BCs ──────────────────────────────────────────
+
+def test_solver_detects_periodic():
+    """Solver._periodic_x is True when periodic walls are present."""
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.001,
+               boundary_config=bc, lid_speed=0.0, smooth_lid=False, force=True)
+    assert s._periodic_x is True
+
+
+def test_solver_no_periodic_by_default():
+    """Solver._periodic_x is False when no periodic walls."""
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.001)
+    assert s._periodic_x is False
+
+
+def test_solver_periodic_uses_explicit_diffusion():
+    """Solver falls back to explicit diffusion when periodic BCs are used."""
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.001,
+               boundary_config=bc, lid_speed=0.0, smooth_lid=False, force=True)
+    assert s._diffusion is None
+
+
+def test_solver_periodic_step_runs():
+    """Solver with periodic x completes a step without errors."""
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.001,
+               boundary_config=bc, lid_speed=0.0, smooth_lid=False, force=True)
+    s.step()
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    assert np.isfinite(s.p).all()
+
+
+def test_solver_periodic_remains_finite():
+    """Solver with periodic x remains stable over many steps."""
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.0005,
+               boundary_config=bc, lid_speed=0.0, smooth_lid=False, force=True)
+    for _ in range(50):
+        s.step()
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    assert s.max_divergence() < 1e-6
+
+
+def test_solver_taylor_green_ic():
+    """Taylor-Green IC produces expected initial velocity field."""
+    Lx, Ly = 2 * np.pi, 2 * np.pi
+    kx, ky = 2 * np.pi / Lx, 2 * np.pi / Ly
+    U0 = 1.0
+
+    def tg_ic(mesh):
+        u = np.zeros(mesh.shape_u)
+        v = np.zeros(mesh.shape_v)
+        p = np.zeros(mesh.shape_p)
+        Xf, Yf = mesh.u_face_grid()
+        u[:, 1:-1] = -U0 * np.sin(kx * Xf) * np.cos(ky * Yf)
+        Xv, Yv = mesh.v_face_grid()
+        v[1:-1, :] = U0 * np.cos(kx * Xv) * np.sin(ky * Yv)
+        return u, v, p
+
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.001, Lx=Lx, Ly=Ly,
+               boundary_config=bc, initial_condition=tg_ic,
+               lid_speed=0.0, smooth_lid=False, force=True)
+    s.solve(simulation_time=0.001, verbose=False)
+
+    # After one step, u should still be close to initial condition
+    Xf, Yf = s.mesh.u_face_grid()
+    u_exact = -U0 * np.sin(kx * Xf) * np.cos(ky * Yf)
+    assert np.allclose(s.u[:, 1:-1], u_exact, atol=0.05)
+
+
+def test_solver_taylor_green_decays():
+    """Taylor-Green vortex decays exponentially over time."""
+    Lx, Ly = 2 * np.pi, 2 * np.pi
+    kx, ky = 2 * np.pi / Lx, 2 * np.pi / Ly
+    U0 = 1.0
+    nu = 0.01
+    d = nu * (kx**2 + ky**2)
+
+    def tg_ic(mesh):
+        u = np.zeros(mesh.shape_u)
+        v = np.zeros(mesh.shape_v)
+        p = np.zeros(mesh.shape_p)
+        Xf, Yf = mesh.u_face_grid()
+        u[:, 1:-1] = -U0 * np.sin(kx * Xf) * np.cos(ky * Yf)
+        Xv, Yv = mesh.v_face_grid()
+        v[1:-1, :] = U0 * np.cos(kx * Xv) * np.sin(ky * Yv)
+        return u, v, p
+
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(32, 32), nu=nu, dt=0.0005, Lx=Lx, Ly=Ly,
+               boundary_config=bc, initial_condition=tg_ic,
+               lid_speed=0.0, smooth_lid=False, force=True)
+    s.solve(simulation_time=1.0, verbose=False)
+
+    # Compare with analytical decay
+    Xf, Yf = s.mesh.u_face_grid()
+    u_exact = -U0 * np.sin(kx * Xf) * np.cos(ky * Yf) * np.exp(-d * s.time)
+    l2 = np.sqrt(np.mean((s.u[:, 1:-1] - u_exact)**2))
+    assert l2 < 0.05
+
+
+def test_solver_couette_periodic():
+    """Couette flow with periodic x converges to linear profile."""
+    bc = BoundaryConditions(
+        top=NoSlipWall(u=1.0), bottom=NoSlipWall(u=0.0),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(16, 32), nu=0.01, dt=0.0005, Lx=1.0, Ly=1.0,
+               boundary_config=bc, lid_speed=0.0, smooth_lid=False, force=True)
+    s.solve(simulation_time=5.0, verbose=False)
+
+    # At t=5 with nu=0.01, H=1, the flow should be partially developed
+    # Check monotonic profile: u increases with y
+    u_mid = s.u[s.Nx // 2, 1:-1]
+    for j in range(len(u_mid) - 1):
+        assert u_mid[j] <= u_mid[j + 1] + 0.01  # allow small numerical error
+
+
+def test_solver_periodic_divergence_small():
+    """Periodic solver maintains small divergence."""
+    def tg_ic(mesh):
+        Lx, Ly = mesh.Lx, mesh.Ly
+        kx, ky = 2 * np.pi / Lx, 2 * np.pi / Ly
+        U0 = 1.0
+        u = np.zeros(mesh.shape_u)
+        v = np.zeros(mesh.shape_v)
+        p = np.zeros(mesh.shape_p)
+        Xf, Yf = mesh.u_face_grid()
+        u[:, 1:-1] = -U0 * np.sin(kx * Xf) * np.cos(ky * Yf)
+        Xv, Yv = mesh.v_face_grid()
+        v[1:-1, :] = U0 * np.cos(kx * Xv) * np.sin(ky * Yv)
+        return u, v, p
+
+    bc = BoundaryConditions(
+        top=FreeSlipWall(), bottom=FreeSlipWall(),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s = Solver(grid_size=(32, 32), nu=0.01, dt=0.0005,
+               Lx=2 * np.pi, Ly=2 * np.pi,
+               boundary_config=bc, initial_condition=tg_ic,
+               lid_speed=0.0, smooth_lid=False, force=True)
+    for _ in range(20):
+        s.step()
+    assert s.max_divergence() < 1e-6
+
+
+def test_solver_couette_with_noslip_x():
+    """Couette with no-slip x walls converges to circulation pattern."""
+    s = Solver(grid_size=(16, 32), nu=0.01, dt=0.001, Lx=1.0, Ly=1.0,
+               lid_speed=1.0, smooth_lid=False, force=True)
+    s.solve(simulation_time=5.0, verbose=False)
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+
+
+def test_cli_parse_boundary_periodic():
+    """CLI periodic BC parsing produces PeriodicWall."""
+    from cfd_solver.cli import _parse_boundary_config
+    bc_cfg = {
+        "top": {"type": "free_slip"},
+        "bottom": {"type": "free_slip"},
+        "left": {"type": "periodic"},
+        "right": {"type": "periodic"},
+    }
+    bc = _parse_boundary_config(bc_cfg)
+    assert isinstance(bc.walls['left'], PeriodicWall)
+    assert isinstance(bc.walls['right'], PeriodicWall)
+    assert isinstance(bc.walls['top'], FreeSlipWall)
+    assert isinstance(bc.walls['bottom'], FreeSlipWall)

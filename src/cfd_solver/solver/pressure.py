@@ -284,6 +284,96 @@ class FFTPressureSolver:
         return p
 
 
+class PeriodicPressureSolver:
+    """Spectral pressure Poisson solver for periodic x + Neumann y.
+
+    Uses DFT along x (periodic) and DCT-II along y (Neumann) to solve
+    the pressure Poisson equation.  Eigenvalues are:
+
+        λx_k = 2(1 − cos(2πk/Nx)) / dx²   (periodic)
+        λy_k = 2(1 − cos(πk/Ny)) / dy²     (Neumann)
+
+    Parameters
+    ----------
+    mesh : Mesh
+        The computational mesh.
+    """
+
+    def __init__(self, mesh):
+        self.Nx = mesh.Nx
+        self.Ny = mesh.Ny
+        self.dx = mesh.dx
+        self.dy = mesh.dy
+
+        Nx, Ny = self.Nx, self.Ny
+
+        # Periodic eigenvalues in x: λx = 2(1 - cos(2πk/Nx)) / dx²
+        kx = np.arange(Nx)
+        eig_x = 2.0 * (1.0 - np.cos(2.0 * np.pi * kx / Nx)) / (self.dx ** 2)
+
+        # Neumann eigenvalues in y: λy = 2(1 - cos(πk/Ny)) / dy²
+        ky = np.arange(Ny)
+        eig_y = 2.0 * (1.0 - np.cos(np.pi * ky / Ny)) / (self.dy ** 2)
+
+        eig_2d = eig_x[:, np.newaxis] + eig_y[np.newaxis, :]
+
+        # Pin the zero mode (kx=0, ky=0) to avoid division by zero
+        eig_2d[0, 0] = np.inf
+        self.eig_2d = eig_2d
+
+    def solve(self, u_star, v_star, dt):
+        """Solve the pressure Poisson equation.
+
+        Parameters
+        ----------
+        u_star, v_star : ndarray
+            The intermediate velocity field.
+        dt : float
+            Time step.
+
+        Returns
+        -------
+        p : ndarray, shape (Nx+2, Ny+2)
+            The calculated pressure field including ghost cells.
+        """
+        Nx, Ny = self.Nx, self.Ny
+
+        # Compute divergence of intermediate velocity over active cells
+        div = (
+            (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / self.dx
+            + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / self.dy
+        )
+
+        # RHS: -∇²p = -(∇·u*)/dt
+        rhs = (-div / dt)
+
+        # Forward DFT along x (periodic) + DCT-II along y (Neumann)
+        from scipy.fft import fft, ifft, dctn, idctn
+        rhs_hat = dctn(rhs, type=2, norm="ortho", axes=(1,))
+        rhs_hat = fft(rhs_hat, axis=0)
+
+        # Solve in frequency domain
+        p_hat = rhs_hat / self.eig_2d
+        p_hat[0, 0] = 0.0
+
+        # Inverse: IDFT along x + IDCT-II along y
+        p_interior = np.real(ifft(p_hat, axis=0))
+        p_interior = idctn(p_interior, type=2, norm="ortho", axes=(1,))
+
+        # Pack into ghost-cell array
+        p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
+        p[1:-1, 1:-1] = p_interior
+
+        # Periodic ghost cells in x
+        p[0, :] = p[Nx, :]
+        p[-1, :] = p[1, :]
+        # Neumann ghost cells in y
+        p[:, 0] = p[:, 1]
+        p[:, -1] = p[:, -2]
+
+        return p
+
+
 # Threshold above which the FFT solver is used.
 # For grids larger than FFT_THRESHOLD × FFT_THRESHOLD, the O(N log N) FFT
 # solver is faster than the O(N^1.5) splu back-substitution.
@@ -300,23 +390,25 @@ def create_pressure_solver(mesh, bc=None):
     bc : BoundaryConditions, optional
         Boundary conditions.  When an :class:`OutletWall` is present the
         direct sparse solver is always used (the FFT solver assumes pure
-        Neumann BCs).
+        Neumann BCs).  When any wall is :class:`PeriodicWall` in x,
+        :class:`PeriodicPressureSolver` is returned.
 
     Returns
     -------
-    PressureSolver or FFTPressureSolver
-        For grids with min(Nx, Ny) ≤ :data:`FFT_THRESHOLD`, returns a
-        :class:`PressureSolver` (direct sparse).  For larger grids returns
-        an :class:`FFTPressureSolver` (spectral DCT-II) — but only when
-        no outlet walls are present.
+    PressureSolver or FFTPressureSolver or PeriodicPressureSolver
     """
-    # FFT solver only supports pure Neumann BCs; fall back to direct for outlets
-    has_outlet = False
-    if bc is not None:
-        from .bc import OutletWall
-        has_outlet = any(isinstance(w, OutletWall) for w in bc.walls.values())
+    from .bc import OutletWall, PeriodicWall
 
-    if has_outlet or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
+    if bc is not None:
+        has_outlet = any(isinstance(w, OutletWall) for w in bc.walls.values())
+        has_periodic = any(isinstance(w, PeriodicWall) for w in bc.walls.values())
+
+        if has_periodic:
+            return PeriodicPressureSolver(mesh)
+        if has_outlet or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
+            return PressureSolver(mesh, bc=bc)
+
+    if mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
         return PressureSolver(mesh, bc=bc)
     return FFTPressureSolver(mesh)
 
