@@ -216,11 +216,6 @@ class Solver:
                 for w in self.bc.walls.values()
             )
             if _has_nonstandard:
-                print(
-                    "  [info] Non-standard BCs detected; using explicit diffusion "
-                    "(Crank-Nicolson requires uniform wall types).",
-                    file=sys.stderr,
-                )
                 self._diffusion = None
             else:
                 self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)

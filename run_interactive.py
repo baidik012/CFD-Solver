@@ -169,7 +169,7 @@ def main():
     print("    2) Couette Flow       — parallel plates, periodic x")
     print("    3) Taylor-Green Vortex — decaying vortex, analytical")
     print("    4) Channel Flow       — Poiseuille (inlet or body force)")
-    print("    5) Custom Setup       — configure parameters manually")
+    print("    5) Custom Cavity      — configure cavity parameters manually")
     print("    0) Quit")
     print()
 
