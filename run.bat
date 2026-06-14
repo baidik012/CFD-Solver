@@ -40,9 +40,9 @@ REM Ensure the solver package is installed
 %VENV_PYTHON% -c "import cfd_solver" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [..] Installing solver package...
-    %VENV_PYTHON% -m pip install -e . -q
+    %VENV_PYTHON% -m pip install . -q
     if %errorlevel% neq 0 (
-        echo WARNING: Failed to install solver package. Running from source.
+        echo WARNING: Package install failed. Running from source.
     ) else (
         echo [OK] Solver package installed
     )

@@ -39,7 +39,7 @@ fi
 echo "[..] Installing dependencies..."
 . venv/bin/activate
 pip install -r requirements.txt
-pip install -e .
+pip install .
 echo "[OK] Dependencies installed"
 
 echo
@@ -52,5 +52,5 @@ echo "    ./run.sh"
 echo
 echo "Or manually:"
 echo "    source venv/bin/activate"
-echo "    python3 examples/lid_cavity.py"
+echo "    python3 run_interactive.py"
 echo
