@@ -720,3 +720,404 @@ def test_cli_module_imports():
     """Verify that the CLI entry point can be imported correctly."""
     import cfd_solver.cli as cli
     assert callable(cli.run)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 0 — Flexible Boundary Conditions
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── Wall Type Classes ─────────────────────────────────────────────────
+
+from cfd_solver.solver.bc import (
+    WallType, NoSlipWall, FreeSlipWall, InletWall, OutletWall, PeriodicWall,
+)
+
+
+def test_wall_type_base_class():
+    """WallType is the base class for all wall types."""
+    assert issubclass(NoSlipWall, WallType)
+    assert issubclass(FreeSlipWall, WallType)
+    assert issubclass(InletWall, WallType)
+    assert issubclass(OutletWall, WallType)
+    assert issubclass(PeriodicWall, WallType)
+
+
+def test_noslip_wall_defaults():
+    """NoSlipWall defaults to zero tangential velocity."""
+    w = NoSlipWall()
+    assert w.u == 0.0
+    assert w.v == 0.0
+
+
+def test_noslip_wall_custom():
+    """NoSlipWall stores custom tangential velocities."""
+    w = NoSlipWall(u=1.5, v=0.3)
+    assert w.u == 1.5
+    assert w.v == 0.3
+
+
+def test_free_slip_wall():
+    """FreeSlipWall stores tangential velocity."""
+    w = FreeSlipWall(u=0.5)
+    assert w.u == 0.5
+    assert w.v == 0.0
+
+
+def test_inlet_wall():
+    """InletWall stores profile and U_max."""
+    w = InletWall(profile="parabolic", U_max=2.0)
+    assert w.profile == "parabolic"
+    assert w.U_max == 2.0
+
+
+def test_outlet_wall():
+    """OutletWall stores method."""
+    w = OutletWall(method="convective")
+    assert w.method == "convective"
+
+
+def test_periodic_wall():
+    """PeriodicWall can be instantiated."""
+    w = PeriodicWall()
+    assert isinstance(w, WallType)
+
+
+# ── BoundaryConditions with New Wall Types ────────────────────────────
+
+def test_bc_backward_compat():
+    """Old-style BoundaryConditions constructor still works."""
+    bc = BoundaryConditions(top=1.0, smooth_lid=True)
+    assert bc.top == 1.0
+    assert bc.smooth_lid is True
+    assert isinstance(bc.walls['top'], NoSlipWall)
+    assert bc.walls['top'].u == 1.0
+
+
+def test_bc_with_noslip_wall_objects():
+    """BoundaryConditions accepts NoSlipWall objects."""
+    bc = BoundaryConditions(
+        top=NoSlipWall(u=2.0),
+        bottom=NoSlipWall(u=0.0),
+        left=NoSlipWall(v=0.0),
+        right=NoSlipWall(v=0.0),
+    )
+    assert bc.top == 2.0
+    assert bc.walls['top'].u == 2.0
+
+
+def test_bc_with_inlet_outlet():
+    """BoundaryConditions accepts InletWall and OutletWall."""
+    bc = BoundaryConditions(
+        left=InletWall(profile="parabolic", U_max=1.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    assert isinstance(bc.walls['left'], InletWall)
+    assert isinstance(bc.walls['right'], OutletWall)
+    assert bc.walls['left'].U_max == 1.0
+
+
+def test_bc_with_free_slip():
+    """BoundaryConditions accepts FreeSlipWall."""
+    bc = BoundaryConditions(
+        top=FreeSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+        left=NoSlipWall(v=0.0),
+        right=NoSlipWall(v=0.0),
+    )
+    assert isinstance(bc.walls['top'], FreeSlipWall)
+
+
+def test_bc_to_wall_none_default():
+    """_to_wall returns default when value is None."""
+    bc = BoundaryConditions.__new__(BoundaryConditions)
+    wall = BoundaryConditions._to_wall(None, NoSlipWall, u=0.5, v=0.0)
+    assert isinstance(wall, NoSlipWall)
+    assert wall.u == 0.5
+
+
+def test_bc_to_wall_scalar():
+    """_to_wall wraps scalar in the default wall type."""
+    wall = BoundaryConditions._to_wall(3.0, NoSlipWall, u=0.0, v=0.0)
+    assert isinstance(wall, NoSlipWall)
+    assert wall.u == 3.0
+
+
+def test_bc_to_wall_type_rejects_bad_type():
+    """_to_wall raises TypeError for unsupported types."""
+    with pytest.raises(TypeError):
+        BoundaryConditions._to_wall("bad", NoSlipWall, u=0.0)
+
+
+# ── bc.apply() with New Wall Types ────────────────────────────────────
+
+def test_bc_apply_inlet_left_uniform():
+    """InletWall on left sets uniform u-velocity at inlet face."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(
+        left=InletWall(profile="uniform", U_max=1.5),
+        right=NoSlipWall(v=0.0),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Left wall u-face (i=0) should be set to U_max
+    assert np.allclose(u[0, 1:-1], 1.5)
+    # Normal v at top/bottom should still be 0
+    assert np.allclose(v[1:-1, 0], 0.0)
+    assert np.allclose(v[1:-1, m.Ny], 0.0)
+
+
+def test_bc_apply_inlet_left_parabolic():
+    """InletWall parabolic profile has correct shape (zero at walls, max in center)."""
+    m = Mesh(1.0, 1.0, 8, 16)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(
+        left=InletWall(profile="parabolic", U_max=1.0),
+        right=NoSlipWall(v=0.0),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    profile = u[0, 1:-1]
+    # Parabolic: max in center, roughly symmetric
+    assert profile.max() == pytest.approx(1.0, abs=0.05)
+    assert profile[len(profile)//2] == pytest.approx(1.0, abs=0.05)
+    # First and last interior values should be small (near walls)
+    assert profile[0] < 0.3
+    assert profile[-1] < 0.3
+
+
+def test_bc_apply_outlet_right_zero_gradient():
+    """OutletWall zero-gradient copies interior to ghost."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    # Set some interior v near the right wall
+    v[6, 3] = 0.7
+    v[7, 3] = 0.9
+    bc = BoundaryConditions(
+        left=NoSlipWall(v=0.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Right ghost v should equal last interior v
+    assert np.allclose(v[-1, :], v[-2, :])
+    # Right wall u-normal should equal last interior u-normal
+    assert np.allclose(u[m.Nx, 1:-1], u[m.Nx - 1, 1:-1])
+
+
+def test_bc_apply_free_slip_top():
+    """FreeSlipWall on top: tangential ghost = interior (zero gradient)."""
+    m = Mesh(1.0, 1.0, 8, 6)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    # Set some interior u near top
+    u[3, -2] = 0.5
+    u[5, -2] = 0.8
+    bc = BoundaryConditions(
+        top=FreeSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+        left=NoSlipWall(v=0.0),
+        right=NoSlipWall(v=0.0),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Free-slip: ghost = interior
+    assert np.allclose(u[3, -1], u[3, -2])
+    assert np.allclose(u[5, -1], u[5, -2])
+    # Normal v at top is still 0
+    assert np.allclose(v[1:-1, m.Ny], 0.0)
+
+
+def test_bc_apply_mixed_noslip_inlet_outlet():
+    """Mixed wall types: inlet left, outlet right, no-slip top/bottom."""
+    m = Mesh(2.0, 1.0, 16, 8)
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    bc = BoundaryConditions(
+        left=InletWall(profile="uniform", U_max=1.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    bc.apply(u, v, m.Nx, m.Ny)
+    # Inlet: u at left face = 1.0
+    assert np.allclose(u[0, 1:-1], 1.0)
+    # Outlet: v ghost = interior
+    assert np.allclose(v[-1, :], v[-2, :])
+    # No-slip top/bottom
+    assert np.allclose(v[1:-1, 0], 0.0)
+    assert np.allclose(v[1:-1, m.Ny], 0.0)
+
+
+# ── Pressure Solver with Outlet BC ────────────────────────────────────
+
+def test_pressure_solver_outlet_pins_column():
+    """PressureSolver with outlet pins pressure at the outlet column."""
+    from cfd_solver.solver.pressure import PressureSolver
+    m = Mesh(1.0, 1.0, 8, 6)
+    bc = BoundaryConditions(
+        left=NoSlipWall(v=0.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    ps = PressureSolver(m, bc=bc)
+    # Outlet column indices: for right outlet, column Nx-1 = 7
+    # Flat index for (7, j) with order F: 7 + j*8
+    assert len(ps._outlet_cols) == 6  # Ny columns
+    assert 7 in ps._outlet_cols       # j=0
+    assert 7 + 8 in ps._outlet_cols   # j=1
+
+
+def test_pressure_solver_outlet_zero_pressure():
+    """PressureSolver with outlet produces near-zero pressure at outlet."""
+    from cfd_solver.solver.pressure import PressureSolver
+    m = Mesh(1.0, 1.0, 8, 6)
+    bc = BoundaryConditions(
+        left=NoSlipWall(v=0.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    ps = PressureSolver(m, bc=bc)
+    # Uniform velocity field → zero divergence → zero pressure
+    u_s = np.zeros(m.shape_u)
+    u_s[:, 1:-1] = 1.0
+    v_s = np.zeros(m.shape_v)
+    p = ps.solve(u_s, v_s, dt=0.001)
+    # Outlet column pressure should be pinned to 0
+    assert np.allclose(p[-2, 1:-1], 0.0, atol=1e-10)
+
+
+def test_create_pressure_solver_outlet_uses_direct():
+    """create_pressure_solver with outlet returns direct solver (not FFT)."""
+    from cfd_solver.solver.pressure import PressureSolver, create_pressure_solver
+    m = Mesh(1.0, 1.0, 256, 256)
+    bc = BoundaryConditions(
+        left=NoSlipWall(v=0.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    ps = create_pressure_solver(m, bc=bc)
+    assert isinstance(ps, PressureSolver)
+
+
+# ── Solver with boundary_config ───────────────────────────────────────
+
+def test_solver_with_boundary_config():
+    """Solver accepts boundary_config parameter."""
+    bc = BoundaryConditions(
+        left=InletWall(profile="uniform", U_max=1.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    s = Solver(
+        grid_size=(16, 8), nu=0.01, dt=0.001,
+        Lx=2.0, Ly=1.0,
+        boundary_config=bc,
+    )
+    assert s.bc.walls['left'] is bc.walls['left']
+    assert s.bc.walls['right'] is bc.walls['right']
+
+
+def test_solver_inlet_outlet_runs():
+    """Full solver with inlet/outlet BCs completes without blowup."""
+    bc = BoundaryConditions(
+        left=InletWall(profile="uniform", U_max=1.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    s = Solver(
+        grid_size=(16, 8), nu=0.01, dt=0.001,
+        Lx=2.0, Ly=1.0,
+        boundary_config=bc,
+    )
+    s.solve(simulation_time=0.05, verbose=False)
+    assert np.isfinite(s.u).all()
+    assert np.isfinite(s.v).all()
+    # Mass should be roughly conserved: inlet flux ≈ outlet flux
+    inlet_flux = np.sum(s.u[0, 1:-1]) * s.dy
+    outlet_flux = np.sum(s.u[s.Nx, 1:-1]) * s.dy
+    assert abs(inlet_flux - outlet_flux) / max(inlet_flux, 1e-10) < 0.5
+
+
+def test_solver_uses_explicit_diffusion_for_inlet():
+    """Solver falls back to explicit diffusion when inlet BC is used."""
+    bc = BoundaryConditions(
+        left=InletWall(profile="uniform", U_max=1.0),
+        right=OutletWall(method="zero_gradient"),
+        top=NoSlipWall(u=0.0),
+        bottom=NoSlipWall(u=0.0),
+    )
+    s = Solver(
+        grid_size=(16, 8), nu=0.01, dt=0.0005,
+        Lx=2.0, Ly=1.0,
+        diffusion_scheme="crank_nicolson",
+        boundary_config=bc,
+    )
+    # Should fall back to explicit (None = explicit path in step())
+    assert s._diffusion is None
+
+
+def test_solver_noslip_still_uses_crank_nicolson():
+    """All-no-slip BC still uses Crank-Nicolson when requested."""
+    s = Solver(
+        grid_size=(16, 8), nu=0.01, dt=0.001,
+        diffusion_scheme="crank_nicolson",
+    )
+    assert s._diffusion is not None
+
+
+# ── CLI Parsing ───────────────────────────────────────────────────────
+
+def test_cli_parse_boundary_legacy():
+    """CLI legacy BC parsing produces correct BoundaryConditions."""
+    from cfd_solver.cli import _parse_boundary_config
+    bc_cfg = {"top": {"u": 2.0}, "smooth_lid": False}
+    bc = _parse_boundary_config(bc_cfg)
+    assert isinstance(bc, BoundaryConditions)
+    assert bc.top == 2.0
+    assert bc.smooth_lid is False
+
+
+def test_cli_parse_boundary_new_format():
+    """CLI new per-wall BC parsing produces correct BoundaryConditions."""
+    from cfd_solver.cli import _parse_boundary_config
+    bc_cfg = {
+        "left": {"type": "inlet", "profile": "parabolic", "U_max": 1.5},
+        "right": {"type": "outlet", "method": "zero_gradient"},
+        "top": {"type": "wall", "u": 0.0},
+        "bottom": {"type": "wall", "u": 0.0},
+    }
+    bc = _parse_boundary_config(bc_cfg)
+    assert isinstance(bc.walls['left'], InletWall)
+    assert bc.walls['left'].U_max == 1.5
+    assert isinstance(bc.walls['right'], OutletWall)
+    assert isinstance(bc.walls['top'], NoSlipWall)
+
+
+def test_cli_parse_boundary_empty():
+    """CLI BC parsing with empty dict returns default no-slip walls."""
+    from cfd_solver.cli import _parse_boundary_config
+    bc = _parse_boundary_config({})
+    assert isinstance(bc.walls['top'], NoSlipWall)
+    assert isinstance(bc.walls['bottom'], NoSlipWall)
+    assert isinstance(bc.walls['left'], NoSlipWall)
+    assert isinstance(bc.walls['right'], NoSlipWall)
+
+
+def test_cli_parse_boundary_none():
+    """CLI BC parsing with None returns default no-slip walls."""
+    from cfd_solver.cli import _parse_boundary_config
+    bc = _parse_boundary_config(None)
+    assert isinstance(bc.walls['top'], NoSlipWall)

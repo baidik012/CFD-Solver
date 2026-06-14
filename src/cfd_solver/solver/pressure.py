@@ -47,10 +47,17 @@ class PressureSolver:
     additive constant), we pin one pressure value to zero to ensure a
     unique solution.
 
+    When an :class:`~cfd_solver.solver.bc.OutletWall` is present, pressure
+    is pinned to zero at the outlet column instead of at cell (0,0), and the
+    zero-mean normalisation is skipped (the outlet defines the reference).
+
     Parameters
     ----------
     mesh : Mesh
         The computational mesh.
+    bc : BoundaryConditions, optional
+        Boundary conditions.  When ``None`` (default), pure Neumann BCs are
+        assumed on all walls.
 
     Attributes
     ----------
@@ -58,15 +65,33 @@ class PressureSolver:
         The discrete Laplacian operator.
     """
 
-    def __init__(self, mesh):
+    def __init__(self, mesh, bc=None):
         self.Nx = mesh.Nx
         self.Ny = mesh.Ny
         self.dx = mesh.dx
         self.dy = mesh.dy
+        self.bc = bc
+
+        # Identify outlet columns to pin (if any)
+        self._outlet_cols = self._find_outlet_columns()
 
         # Build the constant Poisson matrix once during initialization
         self.A = self._build_matrix()
         self._solve = splu(self.A).solve
+
+    def _find_outlet_columns(self):
+        """Return set of pressure column indices that sit at an outlet wall."""
+        cols = set()
+        if self.bc is None:
+            return cols
+        from .bc import OutletWall
+        if isinstance(self.bc.walls.get('left'), OutletWall):
+            for j in range(self.Ny):
+                cols.add(j * self.Nx)          # column i=0
+        if isinstance(self.bc.walls.get('right'), OutletWall):
+            for j in range(self.Ny):
+                cols.add(j * self.Nx + self.Nx - 1)  # column i=Nx-1
+        return cols
 
     def _build_matrix(self):
         """Build the discrete 2D Laplacian operator with Neumann BCs."""
@@ -75,8 +100,6 @@ class PressureSolver:
         inv_dy2 = 1.0 / (self.dy**2)
 
         # 1D Laplacian with Neumann boundaries in x
-        # ∂²p/∂x² ≈ (p[i+1] - 2p[i] + p[i-1]) / dx²
-        # At boundaries, p[ghost] = p[neighbor] => (p[neighbor] - p[i]) / dx²
         diag_x = np.full(Nx, 2.0 * inv_dx2)
         diag_x[0] = inv_dx2
         diag_x[-1] = inv_dx2
@@ -96,11 +119,19 @@ class PressureSolver:
         # Combine into 2D Laplacian via Kronecker product: A = Ly ⊕ Lx
         A = kron(I_Ny, Lx) + kron(Ly, I_Nx)
 
-        # Pin pressure at the first cell (0,0) to ensure a unique solution
         A = A.tolil()
-        A[0, :] = 0
-        A[0, 0] = 1.0
-        
+
+        if self._outlet_cols:
+            # Pin outlet columns to p=0: set row to identity, zero column
+            for col in self._outlet_cols:
+                A[col, :] = 0
+                A[:, col] = 0
+                A[col, col] = 1.0
+        else:
+            # Pure Neumann: pin cell (0,0) to ensure uniqueness
+            A[0, :] = 0
+            A[0, 0] = 1.0
+
         return A.tocsc()
 
     def solve(self, u_star, v_star, dt):
@@ -131,9 +162,14 @@ class PressureSolver:
         # we must negate the RHS, otherwise the projection ADDS divergence
         # instead of removing it and the simulation blows up.
         rhs = (-div / dt).ravel(order="F")
-        
-        # Pin pressure at first cell to 0
-        rhs[0] = 0.0
+
+        if self._outlet_cols:
+            # Pin outlet cells to p=0
+            for col in self._outlet_cols:
+                rhs[col] = 0.0
+        else:
+            # Pure Neumann: pin first cell to 0
+            rhs[0] = 0.0
 
         p_flat = self._solve(rhs)
 
@@ -141,8 +177,9 @@ class PressureSolver:
         # Populate interior physical cells
         p[1:-1, 1:-1] = p_flat.reshape((Nx, Ny), order="F")
 
-        # Normalize to zero mean for consistency
-        p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
+        if not self._outlet_cols:
+            # Normalize to zero mean (only for pure-Neumann case)
+            p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
 
         # Enforce Neumann BCs on pressure ghost cells (zero gradient)
         p[0, :] = p[1, :]
@@ -253,22 +290,33 @@ class FFTPressureSolver:
 FFT_THRESHOLD = 128
 
 
-def create_pressure_solver(mesh):
+def create_pressure_solver(mesh, bc=None):
     """Create the appropriate pressure solver for the given mesh.
 
     Parameters
     ----------
     mesh : Mesh
         The computational mesh.
+    bc : BoundaryConditions, optional
+        Boundary conditions.  When an :class:`OutletWall` is present the
+        direct sparse solver is always used (the FFT solver assumes pure
+        Neumann BCs).
 
     Returns
     -------
     PressureSolver or FFTPressureSolver
         For grids with min(Nx, Ny) ≤ :data:`FFT_THRESHOLD`, returns a
         :class:`PressureSolver` (direct sparse).  For larger grids returns
-        an :class:`FFTPressureSolver` (spectral DCT-II).
+        an :class:`FFTPressureSolver` (spectral DCT-II) — but only when
+        no outlet walls are present.
     """
-    if mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
-        return PressureSolver(mesh)
+    # FFT solver only supports pure Neumann BCs; fall back to direct for outlets
+    has_outlet = False
+    if bc is not None:
+        from .bc import OutletWall
+        has_outlet = any(isinstance(w, OutletWall) for w in bc.walls.values())
+
+    if has_outlet or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
+        return PressureSolver(mesh, bc=bc)
     return FFTPressureSolver(mesh)
 

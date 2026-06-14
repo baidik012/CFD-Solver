@@ -24,11 +24,18 @@ _SCHEMA = {
         "type": dict,
         "fields": {
             "smooth_lid": {"type": bool},
+            # Per-wall specification (all four walls use the same schema)
             "top": {
                 "type": dict,
                 "fields": {
+                    "type": {"type": str, "values": [
+                        "wall", "inlet", "outlet", "periodic", "free_slip",
+                    ]},
                     "u": {"type": (int, float)},
                     "v": {"type": (int, float)},
+                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
+                    "U_max": {"type": (int, float)},
+                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
                 },
             },
             "other": {
@@ -36,6 +43,46 @@ _SCHEMA = {
                 "fields": {
                     "u": {"type": (int, float)},
                     "v": {"type": (int, float)},
+                },
+            },
+            # New per-wall specification
+            "left": {
+                "type": dict,
+                "fields": {
+                    "type": {"type": str, "values": [
+                        "wall", "inlet", "outlet", "periodic", "free_slip",
+                    ]},
+                    "u": {"type": (int, float)},
+                    "v": {"type": (int, float)},
+                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
+                    "U_max": {"type": (int, float)},
+                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
+                },
+            },
+            "right": {
+                "type": dict,
+                "fields": {
+                    "type": {"type": str, "values": [
+                        "wall", "inlet", "outlet", "periodic", "free_slip",
+                    ]},
+                    "u": {"type": (int, float)},
+                    "v": {"type": (int, float)},
+                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
+                    "U_max": {"type": (int, float)},
+                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
+                },
+            },
+            "bottom": {
+                "type": dict,
+                "fields": {
+                    "type": {"type": str, "values": [
+                        "wall", "inlet", "outlet", "periodic", "free_slip",
+                    ]},
+                    "u": {"type": (int, float)},
+                    "v": {"type": (int, float)},
+                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
+                    "U_max": {"type": (int, float)},
+                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
                 },
             },
         },

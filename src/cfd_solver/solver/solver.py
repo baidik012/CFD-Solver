@@ -36,7 +36,7 @@ import time
 import numpy as np
 
 from .mesh import Mesh
-from .bc import BoundaryConditions
+from .bc import BoundaryConditions, NoSlipWall, OutletWall, InletWall, FreeSlipWall
 from . import advection
 from .diffusion import CrankNicolson, create_diffusion_solver
 from .pressure import create_pressure_solver
@@ -89,7 +89,8 @@ class Solver:
 
     def __init__(self, grid_size, nu, dt, lid_speed=1.0, smooth_lid=True,
                  advection_scheme="upwind", diffusion_scheme="crank_nicolson",
-                 Lx=1.0, Ly=1.0, force=False):
+                 Lx=1.0, Ly=1.0, force=False,
+                 boundary_config=None):
         # --- Input Validation ---
         Nx, Ny = grid_size
         if Nx < 2 or Ny < 2:
@@ -132,17 +133,23 @@ class Solver:
         # ------------------------
 
         self.mesh = Mesh(Lx, Ly, Nx, Ny)
-        self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
+
+        # Build boundary conditions — accept pre-built object or legacy scalars
+        if boundary_config is not None:
+            self.bc = boundary_config
+        else:
+            self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
 
         # Stability check: CFL and diffusion constraints.
         # IMPORTANT: Flow velocities can reach 2-3x the lid speed due to recirculation.
         # We use a conservative limit to prevent blowup.
         dx, dy = self.mesh.dx, self.mesh.dy
         dx_min = min(dx, dy)
-        
+
         # Advection stability: CFL = (|u|*dt/dx) + (|v|*dt/dy) < 1
         # Conservatively assume max speed reaches 3x lid_speed during simulation
-        expected_max_speed = 3.0 * max(abs(lid_speed), 1e-10)
+        effective_lid_speed = max(abs(self.bc.top), abs(self.bc.bottom), 1e-10)
+        expected_max_speed = 3.0 * effective_lid_speed
         dt_advection = 0.5 * dx_min / expected_max_speed
         
         # Diffusion stability (mainly for explicit schemes): dt < dx²/(4*nu)
@@ -193,13 +200,28 @@ class Solver:
             raise ValueError(f"Unknown advection scheme: {advection_scheme}")
 
         if diffusion_scheme == "crank_nicolson":
-            self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
+            # Crank-Nicolson matrices encode the BC type at construction time.
+            # Non-standard BCs (inlet, outlet, free-slip) would require matrix
+            # rebuilds.  Fall back to explicit diffusion for simplicity.
+            _has_nonstandard = any(
+                not isinstance(w, NoSlipWall)
+                for w in self.bc.walls.values()
+            )
+            if _has_nonstandard:
+                print(
+                    "  [info] Non-standard BCs detected; using explicit diffusion "
+                    "(Crank-Nicolson requires uniform wall types).",
+                    file=sys.stderr,
+                )
+                self._diffusion = None
+            else:
+                self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
         elif diffusion_scheme == "explicit":
             self._diffusion = None
         else:
             raise ValueError(f"Unknown diffusion scheme: {diffusion_scheme}")
 
-        self._pressure = create_pressure_solver(self.mesh)
+        self._pressure = create_pressure_solver(self.mesh, self.bc)
 
         # Apply initial boundary conditions
         self.bc.apply(self.u, self.v, Nx, Ny)

@@ -11,9 +11,95 @@ import os
 import sys
 import yaml
 from cfd_solver.solver import Solver
+from cfd_solver.solver.bc import (
+    BoundaryConditions, NoSlipWall, FreeSlipWall,
+    InletWall, OutletWall, PeriodicWall,
+)
 from cfd_solver.solver.validate import validate_config
 from cfd_solver.solver.viz import save_contour, save_quiver
 from cfd_solver.utils import handle_error
+
+
+_WALL_TYPE_MAP = {
+    "wall": NoSlipWall,
+    "free_slip": FreeSlipWall,
+    "inlet": InletWall,
+    "outlet": OutletWall,
+    "periodic": PeriodicWall,
+}
+
+
+def _parse_boundary_config(bc_cfg):
+    """Parse a boundary config dict into a :class:`BoundaryConditions`.
+
+    Supports both the legacy ``top`` / ``other`` format and the new
+    per-wall format with ``type`` keys.
+
+    Parameters
+    ----------
+    bc_cfg : dict
+        The ``boundary`` section of the YAML config.
+
+    Returns
+    -------
+    BoundaryConditions
+    """
+    if bc_cfg is None:
+        bc_cfg = {}
+
+    smooth_lid = bc_cfg.get("smooth_lid", True)
+
+    # Detect new per-wall format: any of left/right/bottom has a 'type' key
+    has_new_format = any(
+        isinstance(bc_cfg.get(w), dict) and "type" in bc_cfg.get(w, {})
+        for w in ("left", "right", "bottom")
+    )
+
+    if has_new_format:
+        walls = {}
+        for wall_name in ("left", "right", "top", "bottom"):
+            wall_cfg = bc_cfg.get(wall_name)
+            if not isinstance(wall_cfg, dict) or "type" not in wall_cfg:
+                walls[wall_name] = NoSlipWall(u=0.0, v=0.0)
+                continue
+            wtype = wall_cfg["type"]
+            cls = _WALL_TYPE_MAP.get(wtype, NoSlipWall)
+            if wtype == "wall":
+                walls[wall_name] = NoSlipWall(
+                    u=wall_cfg.get("u", 0.0),
+                    v=wall_cfg.get("v", 0.0),
+                )
+            elif wtype == "free_slip":
+                walls[wall_name] = FreeSlipWall(
+                    u=wall_cfg.get("u", 0.0),
+                    v=wall_cfg.get("v", 0.0),
+                )
+            elif wtype == "inlet":
+                walls[wall_name] = InletWall(
+                    profile=wall_cfg.get("profile", "uniform"),
+                    U_max=wall_cfg.get("U_max", 1.0),
+                )
+            elif wtype == "outlet":
+                walls[wall_name] = OutletWall(
+                    method=wall_cfg.get("method", "zero_gradient"),
+                )
+            elif wtype == "periodic":
+                walls[wall_name] = PeriodicWall()
+            else:
+                walls[wall_name] = NoSlipWall(u=0.0, v=0.0)
+
+        return BoundaryConditions(
+            top=walls['top'],
+            bottom=walls['bottom'],
+            left=walls['left'],
+            right=walls['right'],
+            smooth_lid=smooth_lid,
+        )
+
+    # Legacy format: top.u + smooth_lid
+    top = bc_cfg.get("top", {})
+    top_u = top.get("u", 1.0)
+    return BoundaryConditions(top=top_u, smooth_lid=smooth_lid)
 
 
 def run(args):
@@ -58,19 +144,23 @@ def run(args):
         dt = cfg["dt"]
 
         bc_cfg = cfg.get("boundary", {})
-        top = bc_cfg.get("top", {})
-        top_u = top.get("u", 1.0)
         smooth = bc_cfg.get("smooth_lid", True)
         advection_scheme = cfg.get("advection_scheme", "upwind")
         diffusion_scheme = cfg.get("diffusion_scheme", "crank_nicolson")
 
+        # Parse boundary conditions (supports both legacy and new per-wall format)
+        bc = _parse_boundary_config(bc_cfg)
+
         # Warn about validated-but-unsupported fields rather than silently
         # ignoring them, so configs are never silently misinterpreted.
         ignored = []
-        if top.get("v") not in (None, 0, 0.0):
+        top_cfg = bc_cfg.get("top", {})
+        if isinstance(top_cfg, dict) and top_cfg.get("v") not in (None, 0, 0.0):
             ignored.append("boundary.top.v")
         other = bc_cfg.get("other", {})
-        if any(other.get(k) not in (None, 0, 0.0) for k in ("u", "v")):
+        if isinstance(other, dict) and any(
+            other.get(k) not in (None, 0, 0.0) for k in ("u", "v")
+        ):
             ignored.append("boundary.other")
         if ignored:
             print(
@@ -81,10 +171,11 @@ def run(args):
 
         # Initialize the solver
         solver = Solver(
-            grid_size=(Nx, Ny), nu=nu, dt=dt, lid_speed=top_u,
-            smooth_lid=smooth, Lx=Lx, Ly=Ly,
+            grid_size=(Nx, Ny), nu=nu, dt=dt,
+            Lx=Lx, Ly=Ly,
             advection_scheme=advection_scheme,
             diffusion_scheme=diffusion_scheme,
+            boundary_config=bc,
         )
 
     # Simulation loop — prefer simulation_time over steps
@@ -93,7 +184,9 @@ def run(args):
     if sim_time is None and steps is None:
         # Auto-compute from flow parameters: max(10, 0.1*Re) convective time units
         nu_val = cfg.get("nu", 0.01)
-        top_u = cfg.get("boundary", {}).get("top", {}).get("u", 1.0)
+        bc_cfg_auto = cfg.get("boundary", {})
+        top_cfg = bc_cfg_auto.get("top", {})
+        top_u = top_cfg.get("u", 1.0) if isinstance(top_cfg, dict) else 1.0
         Re = abs(top_u) / max(nu_val, 1e-10)
         t_conv = 1.0 / max(abs(top_u), 1e-10)
         sim_time = t_conv * min(max(10.0, 0.1 * Re), 200.0)
