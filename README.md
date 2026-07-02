@@ -71,16 +71,24 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 ## Validation
 
-Tested against the benchmark data from [Ghia, Ghia & Shin (1982)](https://doi.org/10.1016/0021-9991(82)90055-1) for lid-driven cavity flow:
+The solver is validated against analytical solutions and published benchmark data. A detailed breakdown is available in [VALIDATION.md](VALIDATION.md).
 
-| Re | Grid | Advection | u-L2 | v-L2 |
-|----|------|-----------|------|------|
-| 100 | 128x128 | central | 0.007 | 0.005 |
-| 400 | 128x128 | central | 0.011 | 0.035 |
-| 1000 | 256x256 | upwind | 0.050 | 0.054 |
+| Case | Reference | What it checks | Representative result |
+|------|-----------|----------------|-----------------------|
+| **Taylor-Green vortex** | Exact decaying vortex solution | Periodic/free-slip behavior, transient decay, grid convergence | L2 error ≈ 3.79e-2 at 64×64, t=2s |
+| **Couette flow** | Analytical parallel-plate solution | Wall motion, diffusion, periodic x boundaries | First-order grid convergence in the periodic setup |
+| **Channel / Poiseuille flow** | Analytical parabolic velocity profile | Body-force / inlet-driven channel flow | L2 error ≈ 4.34e-4 at 128×32, t=10s |
+| **Lid-driven cavity** | Ghia, Ghia & Shin (1982) benchmark data | Recirculation, pressure projection, Re-dependent behavior | Re=100: u-L2 ≈ 0.007, v-L2 ≈ 0.005 |
 
-Reproduce with:
+### Reproduce validation cases
+
 ```bash
+python -m examples.taylor_green.validate
+python -m examples.taylor_green.convergence
+python -m examples.couette.validate
+python -m examples.couette.convergence
+python -m examples.channel_flow.validate
+python -m examples.channel_flow.convergence
 python run_ghia_validation.py 100
 python run_ghia_validation.py 400
 python run_ghia_validation.py 1000
