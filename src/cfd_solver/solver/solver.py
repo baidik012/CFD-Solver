@@ -219,13 +219,24 @@ class Solver:
         if diffusion_scheme == "crank_nicolson":
             # Crank-Nicolson matrices encode the BC type at construction time.
             # Periodic walls require a fundamentally different matrix structure
-            # (circulant) so fall back to explicit for that case.
-            _has_periodic = any(
-                isinstance(w, PeriodicWall)
-                for w in self.bc.walls.values()
-            )
-            if _has_periodic:
+            # (circulant) which the current CrankNicolson / FFTCrankNicolson
+            # solvers do not yet support.  Fall back to explicit Euler in that
+            # case, but emit a LOUD warning so the user knows their simulation
+            # is running with a different (less stable, first-order in time)
+            # diffusion scheme than they asked for.
+            # (Audit finding P0-2 — previously this downgrade was silent.)
+            if self.bc.has_periodic():
                 self._diffusion = None
+                if not force:
+                    print(
+                        "  [WARNING] PeriodicWall detected — Crank-Nicolson diffusion\n"
+                        "            is not yet supported with periodic boundary conditions.\n"
+                        "            Falling back to explicit Euler (first-order in time,\n"
+                        "            requires dt < dx^2 / (4*nu) for stability).\n"
+                        "            To silence this warning: pass force=True or set\n"
+                        "            diffusion_scheme='explicit' explicitly.",
+                        file=sys.stderr,
+                    )
             else:
                 self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
         elif diffusion_scheme == "explicit":
