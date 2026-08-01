@@ -9,5 +9,7 @@ dt: 0.001
 simulation_time: 20.0
 
 boundary:
-  top: {u: 1.0, v: 0.0}
-  other: {u: 0.0, v: 0.0}
+  top:    {type: wall, u: 1.0, v: 0.0}
+  bottom: {type: wall, u: 0.0, v: 0.0}
+  left:   {type: wall, u: 0.0, v: 0.0}
+  right:  {type: wall, u: 0.0, v: 0.0}

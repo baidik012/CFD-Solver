@@ -18,6 +18,7 @@ from cfd_solver.solver.bc import (
 )
 from cfd_solver.solver.validate import validate_config, WALL_TYPE_VALUES
 from cfd_solver.solver.viz import save_contour, save_quiver
+from cfd_solver.config_loader import load_config
 from cfd_solver.utils import handle_error
 
 
@@ -135,24 +136,24 @@ def run(args):
             print(f"Error: checkpoint not found: {args.resume}")
             raise SystemExit(1)
         solver = Solver.from_checkpoint(args.resume)
-        with open(args.config) as f:
-            cfg = yaml.safe_load(f) or {}
+        # Config is optional when resuming — only load if provided.
+        if args.config:
+            cfg = load_config(args.config)
+        else:
+            cfg = {}
     else:
         # Start a new simulation from a config file
+        if args.config is None:
+            print("Error: config file required (or use --resume to load a checkpoint)",
+                  file=sys.stderr)
+            raise SystemExit(1)
         if not os.path.exists(args.config):
             print(f"Error: config file not found: {args.config}")
             raise SystemExit(1)
 
-        with open(args.config) as f:
-            cfg = yaml.safe_load(f)
-
-        # Validate the configuration schema
-        errors = validate_config(cfg)
-        if errors:
-            print("Config validation errors:", file=sys.stderr)
-            for e in errors:
-                print(f"  - {e}", file=sys.stderr)
-            raise SystemExit(1)
+        # load_config() runs validate_config() and exits with clear
+        # error messages on schema failure. (Audit finding P1-5.)
+        cfg = load_config(args.config)
 
         # Extract parameters from config
         geo = cfg["geometry"]
@@ -282,7 +283,8 @@ def main():
 
     # 'run' subcommand
     run_parser = sub.add_parser("run", help="Run a simulation")
-    run_parser.add_argument("config", help="YAML config file")
+    run_parser.add_argument("config", nargs="?", default=None,
+                            help="YAML config file (optional with --resume)")
     run_parser.add_argument(
         "--output", "-o", default="output/result.png",
         help="Output plot path (default: output/result.png)",
