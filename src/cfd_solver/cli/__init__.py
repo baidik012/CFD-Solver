@@ -14,20 +14,17 @@ import numpy as np
 from cfd_solver.solver import Solver
 from cfd_solver.solver.bc import (
     BoundaryConditions, NoSlipWall, FreeSlipWall,
-    InletWall, OutletWall, PeriodicWall,
+    InletWall, OutletWall, PeriodicWall, WALL_TYPE_REGISTRY,
 )
-from cfd_solver.solver.validate import validate_config
+from cfd_solver.solver.validate import validate_config, WALL_TYPE_VALUES
 from cfd_solver.solver.viz import save_contour, save_quiver
 from cfd_solver.utils import handle_error
 
 
-_WALL_TYPE_MAP = {
-    "wall": NoSlipWall,
-    "free_slip": FreeSlipWall,
-    "inlet": InletWall,
-    "outlet": OutletWall,
-    "periodic": PeriodicWall,
-}
+# Wall-type lookup derived from the single source of truth in bc.py.
+# (Audit finding P0-1 / P0-3 — previously this was a hand-maintained
+# duplicate of the same mapping.)
+_WALL_TYPE_MAP = WALL_TYPE_REGISTRY
 
 
 def _parse_boundary_config(bc_cfg):
