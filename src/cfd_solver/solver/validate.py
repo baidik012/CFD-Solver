@@ -5,6 +5,33 @@ it to the Solver. Returns a list of human-readable error strings;
 an empty list means the config is valid.
 """
 
+# ────────────────────────────────────────────────────────────────────────────
+# Single source of truth for wall-related validation.
+# Previously the per-wall field spec was duplicated 4× (once per wall),
+# which made adding a new wall type a 4-site edit. Now it is defined once
+# and reused. (Audit finding P0-3.)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Allowed wall type strings. Kept in sync with cli._WALL_TYPE_MAP.
+WALL_TYPE_VALUES = ["wall", "inlet", "outlet", "periodic", "free_slip"]
+
+# Field spec shared by all four walls (top / bottom / left / right).
+_WALL_FIELDS = {
+    "type":     {"type": str, "values": WALL_TYPE_VALUES},
+    "u":        {"type": (int, float)},
+    "v":        {"type": (int, float)},
+    "profile":  {"type": str, "values": ["uniform", "parabolic"]},
+    "U_max":    {"type": (int, float)},
+    "method":   {"type": str, "values": ["zero_gradient", "convective"]},
+}
+
+# Build the per-wall sub-schemas from the shared spec. Each wall uses the
+# identical field set, so a future change only needs to edit _WALL_FIELDS.
+_PER_WALL_SCHEMA = {
+    "type": dict,
+    "fields": dict(_WALL_FIELDS),
+}
+
 _SCHEMA = {
     "geometry": {
         "required": True,
@@ -24,67 +51,13 @@ _SCHEMA = {
         "type": dict,
         "fields": {
             "smooth_lid": {"type": bool},
-            # Per-wall specification (all four walls use the same schema)
-            "top": {
-                "type": dict,
-                "fields": {
-                    "type": {"type": str, "values": [
-                        "wall", "inlet", "outlet", "periodic", "free_slip",
-                    ]},
-                    "u": {"type": (int, float)},
-                    "v": {"type": (int, float)},
-                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
-                    "U_max": {"type": (int, float)},
-                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
-                },
-            },
-            "other": {
-                "type": dict,
-                "fields": {
-                    "u": {"type": (int, float)},
-                    "v": {"type": (int, float)},
-                },
-            },
-            # New per-wall specification
-            "left": {
-                "type": dict,
-                "fields": {
-                    "type": {"type": str, "values": [
-                        "wall", "inlet", "outlet", "periodic", "free_slip",
-                    ]},
-                    "u": {"type": (int, float)},
-                    "v": {"type": (int, float)},
-                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
-                    "U_max": {"type": (int, float)},
-                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
-                },
-            },
-            "right": {
-                "type": dict,
-                "fields": {
-                    "type": {"type": str, "values": [
-                        "wall", "inlet", "outlet", "periodic", "free_slip",
-                    ]},
-                    "u": {"type": (int, float)},
-                    "v": {"type": (int, float)},
-                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
-                    "U_max": {"type": (int, float)},
-                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
-                },
-            },
-            "bottom": {
-                "type": dict,
-                "fields": {
-                    "type": {"type": str, "values": [
-                        "wall", "inlet", "outlet", "periodic", "free_slip",
-                    ]},
-                    "u": {"type": (int, float)},
-                    "v": {"type": (int, float)},
-                    "profile": {"type": str, "values": ["uniform", "parabolic"]},
-                    "U_max": {"type": (int, float)},
-                    "method": {"type": str, "values": ["zero_gradient", "convective"]},
-                },
-            },
+            # All four walls share the same schema (see _PER_WALL_SCHEMA above).
+            # The legacy dead "other" key has been removed; it was never read
+            # by the parser or the Solver and only caused confusion.
+            "top":    dict(_PER_WALL_SCHEMA),
+            "bottom": dict(_PER_WALL_SCHEMA),
+            "left":   dict(_PER_WALL_SCHEMA),
+            "right":  dict(_PER_WALL_SCHEMA),
         },
     },
     "advection_scheme": {"type": str, "values": ["upwind", "central"]},
