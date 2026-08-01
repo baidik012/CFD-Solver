@@ -275,10 +275,20 @@ def main():
     """
     from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
+
+    # Pre-scan argv for --no-update-check so we can skip the network call
+    # before constructing the full argparse parser.  (Audit finding P2-14.)
+    # The env var CFD_SOLVER_NO_UPDATE_CHECK=1 has the same effect.
+    if "--no-update-check" in sys.argv:
+        os.environ["CFD_SOLVER_NO_UPDATE_CHECK"] = "1"
     check_for_updates()
 
     parser = argparse.ArgumentParser(description=f"CFD Solver v{__version__}")
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--no-update-check", action="store_true",
+        help="Skip the git update check (also set via CFD_SOLVER_NO_UPDATE_CHECK=1)",
+    )
     sub = parser.add_subparsers(required=True)
 
     # 'run' subcommand

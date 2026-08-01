@@ -6,12 +6,33 @@ Provides three main functions:
   - save_streamlines: pressure + velocity streamlines side-by-side
 
 Both accept a Mesh and the velocity/pressure arrays directly.
+
+Backend note (audit finding P2-9):
+    Previously this module called ``matplotlib.use('Agg')`` at import
+    time, which globally forced the non-interactive Agg backend for
+    the entire process.  This broke interactive use in Jupyter
+    notebooks: importing anything from ``cfd_solver.solver`` (which
+    re-exports the save_* functions) silently switched off inline
+    plotting.  Now each save_* function sets the Agg backend *only
+    if no backend has been chosen yet*, using ``force=False``.
 """
 
 import os
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")
+# Only switch to Agg if the user has not already chosen a backend.
+# This preserves interactive notebook backends (%matplotlib inline,
+# ipympl, etc.) while still working headless on a server.
+if matplotlib.get_backend().lower() not in ('agg',):
+    # The first import of pyplot freezes the backend, so we must set
+    # it before pyplot is imported.  ``force=False`` means: only set
+    # if no backend has been chosen yet.
+    try:
+        matplotlib.use('Agg', force=False)
+    except Exception:
+        # If a backend is already locked in, just continue — the
+        # savefig calls below will use whatever is active.
+        pass
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -116,7 +137,7 @@ def save_contour(mesh, u, v, p, path, skip=None, scale=None):
     print(f"Saved {path}")
 
 
-def save_streamlines(mesh, u, v, p, path, density=2.0):
+def save_streamlines(mesh, u, v, p, path, density=2.0, vmin=None, vmax=None):
     """Save pressure contours and velocity streamlines side-by-side.
 
     Parameters
@@ -129,6 +150,14 @@ def save_streamlines(mesh, u, v, p, path, density=2.0):
         Output file path.
     density : float, optional
         Matplotlib streamplot density parameter.
+    vmin : float, optional
+        Lower bound for the log10(speed) colour scale.  If None (default),
+        derived from the data: ``max(-6, floor(min(log_speed)))``.  This
+        prevents low-speed flows from being clipped at the previous
+        hardcoded floor of -6.  (Audit finding P2-16.)
+    vmax : float, optional
+        Upper bound for the log10(speed) colour scale.  If None (default),
+        derived from the data: ``max(0, ceil(max(log_speed)))``.
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
@@ -147,10 +176,16 @@ def save_streamlines(mesh, u, v, p, path, density=2.0):
     axes[0].set_aspect("equal")
     plt.colorbar(cf, ax=axes[0], label="p")
 
-    # Velocity streamlines
-    vmin = -6
-    vmax = int(np.ceil(np.max(log_speed)))
-    vmax = max(0, vmax)
+    # Velocity streamlines — derive colour-scale bounds from the data
+    # unless the caller supplied explicit values.  Previously vmin was
+    # hardcoded to -6, which clipped any flow slower than 1e-6 m/s
+    # (e.g. Stokes flow, natural-convection benchmarks) to the bottom
+    # of the scale and hid the actual flow structure.  (Audit P2-16.)
+    finite_log = log_speed[np.isfinite(log_speed)]
+    if vmin is None:
+        vmin = max(-6, int(np.floor(np.min(finite_log)))) if finite_log.size else -6
+    if vmax is None:
+        vmax = max(0, int(np.ceil(np.max(finite_log)))) if finite_log.size else 0
 
     st = axes[1].streamplot(
         mesh.xc, mesh.yc, u_c.T, v_c.T,
