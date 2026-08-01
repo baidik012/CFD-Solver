@@ -61,6 +61,19 @@ class Mesh:
     """
 
     def __init__(self, Lx: float, Ly: float, Nx: int, Ny: int):
+        # Input validation (audit finding P3-18).  Previously Mesh
+        # accepted any values, including Lx=0 or Nx=0, which produced
+        # dx=0 / dy=0 and led to division-by-zero errors several call
+        # frames downstream in the advection / diffusion modules.
+        if Lx <= 0:
+            raise ValueError(f"Lx must be positive, got {Lx}")
+        if Ly <= 0:
+            raise ValueError(f"Ly must be positive, got {Ly}")
+        if Nx < 1:
+            raise ValueError(f"Nx must be at least 1, got {Nx}")
+        if Ny < 1:
+            raise ValueError(f"Ny must be at least 1, got {Ny}")
+
         self.Lx = Lx
         self.Ly = Ly
         self.Nx = Nx

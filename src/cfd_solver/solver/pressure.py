@@ -397,15 +397,12 @@ def create_pressure_solver(mesh, bc=None):
     -------
     PressureSolver or FFTPressureSolver or PeriodicPressureSolver
     """
-    from .bc import OutletWall, PeriodicWall
-
     if bc is not None:
-        has_outlet = any(isinstance(w, OutletWall) for w in bc.walls.values())
-        has_periodic = any(isinstance(w, PeriodicWall) for w in bc.walls.values())
-
-        if has_periodic:
+        # Use the BC object's helper methods rather than re-running
+        # isinstance checks here. (Audit finding P0-1.)
+        if bc.has_periodic():
             return PeriodicPressureSolver(mesh)
-        if has_outlet or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
+        if bc.has_outlet() or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
             return PressureSolver(mesh, bc=bc)
 
     if mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:

@@ -9,13 +9,13 @@ Usage:
 import os
 import sys
 import argparse
-import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from cfd_solver.solver import Solver
 from cfd_solver.solver.viz import save_contour
 from cfd_solver.validation import print_error_report
+from cfd_solver.config_loader import load_config
 
 
 def main():
@@ -27,8 +27,9 @@ def main():
                         help="Use steady-state convergence check")
     args = parser.parse_args()
 
-    with open(args.config) as f:
-        cfg = yaml.safe_load(f)
+    # load_config() validates the YAML schema before returning.
+    # (Audit finding P1-6 — examples previously skipped validation.)
+    cfg = load_config(args.config)
 
     geo = cfg["geometry"]
     bc_cfg = cfg.get("boundary", {})

@@ -10,7 +10,6 @@ Usage:
 import os
 import sys
 import argparse
-import yaml
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
@@ -23,6 +22,7 @@ from cfd_solver.solver.viz import save_contour
 from cfd_solver.validation import (
     extract_profile, compute_l2_error, compute_linf_error, print_error_report,
 )
+from cfd_solver.config_loader import load_config
 
 
 def parabolic_profile(y, H, U_max=1.0):
@@ -127,8 +127,9 @@ def main():
     else:
         config_path = os.path.join(script_dir, "config_body_force.yaml")
 
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    # load_config() validates the YAML schema before returning.
+    # (Audit finding P1-6 — examples previously skipped validation.)
+    cfg = load_config(config_path)
 
     out = args.output or os.path.join(script_dir, "..", "..", "output", "channel_flow", f"result_{args.variant}.png")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

@@ -219,13 +219,24 @@ class Solver:
         if diffusion_scheme == "crank_nicolson":
             # Crank-Nicolson matrices encode the BC type at construction time.
             # Periodic walls require a fundamentally different matrix structure
-            # (circulant) so fall back to explicit for that case.
-            _has_periodic = any(
-                isinstance(w, PeriodicWall)
-                for w in self.bc.walls.values()
-            )
-            if _has_periodic:
+            # (circulant) which the current CrankNicolson / FFTCrankNicolson
+            # solvers do not yet support.  Fall back to explicit Euler in that
+            # case, but emit a LOUD warning so the user knows their simulation
+            # is running with a different (less stable, first-order in time)
+            # diffusion scheme than they asked for.
+            # (Audit finding P0-2 — previously this downgrade was silent.)
+            if self.bc.has_periodic():
                 self._diffusion = None
+                if not force:
+                    print(
+                        "  [WARNING] PeriodicWall detected — Crank-Nicolson diffusion\n"
+                        "            is not yet supported with periodic boundary conditions.\n"
+                        "            Falling back to explicit Euler (first-order in time,\n"
+                        "            requires dt < dx^2 / (4*nu) for stability).\n"
+                        "            To silence this warning: pass force=True or set\n"
+                        "            diffusion_scheme='explicit' explicitly.",
+                        file=sys.stderr,
+                    )
             else:
                 self._diffusion = create_diffusion_solver(self.mesh, nu, dt, self.bc)
         elif diffusion_scheme == "explicit":
@@ -549,7 +560,8 @@ class Solver:
         )
 
     @classmethod
-    def from_checkpoint(cls, path, force=False):
+    def from_checkpoint(cls, path, force=False, body_force=None,
+                        initial_condition=None, boundary_config=None):
         """Load a solver instance from a checkpoint file.
 
         Parameters
@@ -558,6 +570,23 @@ class Solver:
             Path to the .npz checkpoint file.
         force : bool, optional
             If True, bypass safety checks during initialization.
+        body_force : callable, optional
+            Re-attach a body-force function to the restored solver.
+            Checkpoints do not serialize Python callables, so any
+            body force from the original simulation MUST be re-supplied
+            here.  A loud warning is printed if this is None and the
+            caller is expected to have had one.  (Audit finding P2-12.)
+        initial_condition : callable, optional
+            Re-attach an initial-condition function.  Same caveat as
+            ``body_force`` — not serialized, must be re-supplied.
+        boundary_config : BoundaryConditions, optional
+            Re-attach a full boundary-conditions object.  Checkpoints
+            only serialize ``lid_speed`` and ``smooth_lid`` (the legacy
+            scalar attributes); any non-default wall types (InletWall,
+            OutletWall, PeriodicWall, FreeSlipWall) are lost on
+            checkpoint round-trip.  Pass the original BC object here
+            to restore it.  A warning is printed if this is None and
+            the checkpoint appears to have used non-default BCs.
 
         Returns
         -------
@@ -571,7 +600,7 @@ class Solver:
                 raise FileNotFoundError(f"Checkpoint file not found: {path}")
 
         data = np.load(path)
-        
+
         required_keys = ["u", "v", "p", "Nx", "Ny", "Lx", "Ly", "dt", "nu"]
         for key in required_keys:
             if key not in data:
@@ -585,11 +614,43 @@ class Solver:
         advection_scheme = str(data["advection_scheme"]) if "advection_scheme" in data else "upwind"
         diffusion_scheme = str(data["diffusion_scheme"]) if "diffusion_scheme" in data else "crank_nicolson"
 
+        # ── Audit finding P2-12 — warn about unserialised state ───────
+        # The legacy checkpoint format only stores lid_speed + smooth_lid.
+        # Any non-default BC (InletWall, OutletWall, PeriodicWall,
+        # FreeSlipWall) and any body_force / initial_condition are
+        # silently lost.  Warn loudly so users do not accidentally
+        # resume, e.g., a channel-flow sim as a lid-driven cavity.
+        if boundary_config is None and not force:
+            print(
+                "  [WARNING] from_checkpoint: boundary_config not supplied.\n"
+                "            Checkpoints only serialise lid_speed and smooth_lid;\n"
+                "            any non-default wall types (InletWall, OutletWall,\n"
+                "            PeriodicWall, FreeSlipWall) from the original run are\n"
+                "            LOST.  Pass boundary_config=<original BC> to restore.\n"
+                "            (Set force=True to silence this warning.)",
+                file=sys.stderr,
+            )
+        if body_force is None and not force:
+            # We cannot detect whether the original had a body force
+            # (it is not serialised), so we warn unconditionally.
+            print(
+                "  [WARNING] from_checkpoint: body_force not supplied.\n"
+                "            If the original simulation used a body force, it is\n"
+                "            LOST on checkpoint round-trip (Python callables are\n"
+                "            not serialised).  Pass body_force=<original fn> to\n"
+                "            restore, or force=True to silence.",
+                file=sys.stderr,
+            )
+        # ────────────────────────────────────────────────────────────────
+
         solver = cls(grid_size=(Nx, Ny), nu=nu, dt=dt, Lx=Lx, Ly=Ly,
                      lid_speed=lid_speed, smooth_lid=smooth_lid,
                      advection_scheme=advection_scheme, diffusion_scheme=diffusion_scheme,
-                     force=force)
-        
+                     force=force,
+                     boundary_config=boundary_config,
+                     body_force=body_force,
+                     initial_condition=initial_condition)
+
         # Validate data integrity
         for name, arr in [("u", data["u"]), ("v", data["v"]), ("p", data["p"])]:
             expected_shape = getattr(solver, name).shape

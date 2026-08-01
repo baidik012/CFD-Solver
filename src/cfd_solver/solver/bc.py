@@ -19,6 +19,19 @@ Pressure BCs:
 We typically use Neumann (zero-gradient) boundary conditions for pressure,
 implying that the pressure at the ghost cell is equal to the pressure at the
 adjacent interior cell: p_ghost = p_interior.
+
+Design (Audit refactoring P0-1):
+---------------------------------
+Each :class:`WallType` subclass implements four ``apply_*`` methods
+(``apply_top``, ``apply_bottom``, ``apply_left``, ``apply_right``) that
+mutate the (u, v) arrays in place.  :meth:`BoundaryConditions.apply`
+simply iterates the four walls and delegates.  Adding a new wall type
+no longer requires editing ``apply`` — the new subclass just implements
+the four methods.
+
+The diffusion-solver dispatch (``is_noslip`` / ``ghost_cell_coeffs``)
+is also moved onto WallType, eliminating the isinstance chains that
+previously lived in ``diffusion.py``.
 """
 
 import numpy as np
@@ -26,11 +39,80 @@ import numpy as np
 
 # ---------------------------------------------------------------------------
 # Wall type classes for flexible boundary condition specification.
+#
+# Each wall type implements:
+#   - apply_top(u, v, Nx, Ny, bc)     — set BCs at the top wall (j = Ny)
+#   - apply_bottom(u, v, Nx, Ny, bc)  — set BCs at the bottom wall (j = 0)
+#   - apply_left(u, v, Nx, Ny, bc)    — set BCs at the left wall (i = 0)
+#   - apply_right(u, v, Nx, Ny, bc)   — set BCs at the right wall (i = Nx)
+#   - is_noslip() -> bool             — used by FFTCrankNicolson to pick DST/DCT
+#   - ghost_cell_coeffs(component)    — used by CrankNicolson to build its matrix
+#
+# Adding a new wall type means subclassing WallType and implementing these
+# six methods.  No edits to BoundaryConditions.apply, diffusion.py, or
+# pressure.py are required (audit finding P0-1).
 # ---------------------------------------------------------------------------
 
 class WallType:
-    """Base class for all wall boundary condition types."""
-    pass
+    """Base class for all wall boundary condition types.
+
+    Subclasses override the four ``apply_*`` methods to enforce their
+    specific boundary condition.  The default implementations are
+    no-ops, so a subclass only needs to override the walls it actually
+    affects (though in practice all four are usually overridden).
+
+    The ``bc`` parameter passed to each ``apply_*`` method is the
+    owning :class:`BoundaryConditions` instance, giving wall types
+    access to shared helpers like ``_inlet_profile`` and
+    ``_get_lid_profile``.
+    """
+
+    # String identifier used by the CLI / YAML schema.  Subclasses set this
+    # so that the parser can look up the class via a single registry
+    # (see ``WALL_TYPE_REGISTRY`` below).
+    type_name = "wall"
+
+    def apply_top(self, u, v, Nx, Ny, bc):
+        """Enforce BC at the top wall (j = Ny). Default: no-op."""
+        pass
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        """Enforce BC at the bottom wall (j = 0). Default: no-op."""
+        pass
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        """Enforce BC at the left wall (i = 0). Default: no-op."""
+        pass
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        """Enforce BC at the right wall (i = Nx). Default: no-op."""
+        pass
+
+    # ── Diffusion-solver hooks ──────────────────────────────────────────
+
+    def is_noslip(self):
+        """Return True if this wall behaves as a no-slip wall for the
+        implicit Laplacian (i.e. tangential velocity is fixed, requiring
+        the ghost-cell Dirichlet treatment).
+
+        Used by :class:`~cfd_solver.solver.diffusion.FFTCrankNicolson`
+        to decide between DST-II (no-slip) and DCT-II (free-slip) along
+        the relevant axis.
+        """
+        return False
+
+    def ghost_cell_coeffs(self, component='u'):
+        """Return ``(has_dirichlet, wall_value)`` for the implicit Laplacian.
+
+        - For Dirichlet (no-slip) walls: ghost = 2*u_wall - interior,
+          so returns ``(True, u_wall)``.
+        - For Neumann (free-slip) walls: ghost = interior,
+          so returns ``(False, 0.0)``.
+
+        ``component`` is ``'u'`` for top/bottom walls (tangential u) or
+        ``'v'`` for left/right walls (tangential v).
+        """
+        return (False, 0.0)
 
 
 class NoSlipWall(WallType):
@@ -44,12 +126,40 @@ class NoSlipWall(WallType):
         Tangential v-velocity at the wall (for left/right walls). Default 0.0.
     """
 
+    type_name = "wall"
+
     def __init__(self, u=0.0, v=0.0):
         self.u = u
         self.v = v
 
     def __repr__(self):
         return f"NoSlipWall(u={self.u}, v={self.v})"
+
+    def apply_top(self, u, v, Nx, Ny, bc):
+        v[1:-1, Ny] = 0.0
+        if bc.smooth_lid:
+            u[:, -1] = 2.0 * bc._get_lid_profile(Nx) - u[:, -2]
+        else:
+            u[:, -1] = 2.0 * self.u - u[:, -2]
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        v[1:-1, 0] = 0.0
+        u[:, 0] = 2.0 * self.u - u[:, 1]
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        u[0, 1:-1] = 0.0
+        v[0, :] = 2.0 * self.v - v[1, :]
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        u[Nx, 1:-1] = 0.0
+        v[-1, :] = 2.0 * self.v - v[-2, :]
+
+    def is_noslip(self):
+        return True
+
+    def ghost_cell_coeffs(self, component='u'):
+        val = self.u if component == 'u' else self.v
+        return (True, val)
 
 
 class FreeSlipWall(WallType):
@@ -63,12 +173,36 @@ class FreeSlipWall(WallType):
         Tangential v-velocity at the wall. Default 0.0.
     """
 
+    type_name = "free_slip"
+
     def __init__(self, u=0.0, v=0.0):
         self.u = u
         self.v = v
 
     def __repr__(self):
         return f"FreeSlipWall(u={self.u}, v={self.v})"
+
+    def apply_top(self, u, v, Nx, Ny, bc):
+        v[1:-1, Ny] = 0.0
+        u[:, -1] = u[:, -2]   # free-slip: ghost = interior
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        v[1:-1, 0] = 0.0
+        u[:, 0] = u[:, 1]
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        u[0, 1:-1] = 0.0
+        v[0, :] = v[1, :]
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        u[Nx, 1:-1] = 0.0
+        v[-1, :] = v[-2, :]
+
+    def is_noslip(self):
+        return False
+
+    def ghost_cell_coeffs(self, component='u'):
+        return (False, 0.0)
 
 
 class InletWall(WallType):
@@ -83,12 +217,38 @@ class InletWall(WallType):
         Maximum velocity at the inlet. Default 1.0.
     """
 
+    type_name = "inlet"
+
     def __init__(self, profile="uniform", U_max=1.0):
         self.profile = profile
         self.U_max = U_max
 
     def __repr__(self):
         return f"InletWall(profile={self.profile!r}, U_max={self.U_max})"
+
+    def apply_top(self, u, v, Nx, Ny, bc):
+        v[1:-1, Ny] = bc._inlet_profile(self, Ny, axis='y')
+        u[:, -1] = 2.0 * 0.0 - u[:, -2]
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        v[1:-1, 0] = bc._inlet_profile(self, Ny, axis='y')
+        u[:, 0] = 2.0 * 0.0 - u[:, 1]
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        u[0, 1:-1] = bc._inlet_profile(self, Ny, axis='x')
+        v[0, :] = 2.0 * 0.0 - v[1, :]
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        u[Nx, 1:-1] = bc._inlet_profile(self, Ny, axis='x')
+        v[-1, :] = 2.0 * 0.0 - v[-2, :]
+
+    def is_noslip(self):
+        # Tangential component is zero (Dirichlet) → treated as NoSlip for DST.
+        return True
+
+    def ghost_cell_coeffs(self, component='u'):
+        # Same as NoSlipWall with u_wall = 0 (tangential velocity is zero).
+        return (True, 0.0)
 
 
 class OutletWall(WallType):
@@ -101,18 +261,82 @@ class OutletWall(WallType):
         ``"convective"`` (convective outflow). Default ``"zero_gradient"``.
     """
 
+    type_name = "outlet"
+
     def __init__(self, method="zero_gradient"):
         self.method = method
 
     def __repr__(self):
         return f"OutletWall(method={self.method!r})"
 
+    def apply_top(self, u, v, Nx, Ny, bc):
+        v[1:-1, Ny] = v[1:-1, Ny - 1]   # zero-gradient
+        u[:, -1] = u[:, -2]              # zero-gradient
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        v[1:-1, 0] = v[1:-1, 1]
+        u[:, 0] = u[:, 1]
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        u[0, 1:-1] = u[1, 1:-1]
+        v[0, :] = v[1, :]
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        u[Nx, 1:-1] = u[Nx - 1, 1:-1]
+        v[-1, :] = v[-2, :]
+
+    def is_noslip(self):
+        # Tangential component is zero (Dirichlet) → treated as NoSlip for DST.
+        return True
+
+    def ghost_cell_coeffs(self, component='u'):
+        return (True, 0.0)
+
 
 class PeriodicWall(WallType):
     """Periodic boundary: wraps to the opposite wall."""
 
+    type_name = "periodic"
+
     def __repr__(self):
         return "PeriodicWall()"
+
+    def apply_top(self, u, v, Nx, Ny, bc):
+        # y-periodic: top ghost = bottom interior
+        u[:, -1] = u[:, 1]
+
+    def apply_bottom(self, u, v, Nx, Ny, bc):
+        # y-periodic: bottom ghost = top interior
+        u[:, 0] = u[:, Ny]
+        v[1:-1, 0] = v[1:-1, Ny]
+
+    def apply_left(self, u, v, Nx, Ny, bc):
+        # x-periodic: left ghost = right interior
+        v[0, :] = v[Nx, :]
+        u[0, 1:-1] = u[Nx, 1:-1]
+
+    def apply_right(self, u, v, Nx, Ny, bc):
+        # x-periodic: right ghost = left interior
+        v[-1, :] = v[1, :]
+        u[Nx, 1:-1] = u[0, 1:-1]
+
+    def is_noslip(self):
+        return False
+
+    def ghost_cell_coeffs(self, component='u'):
+        return (False, 0.0)
+
+
+# Single source of truth for wall-type-name → class lookup.
+# The CLI parser and the YAML schema both consult this map rather than
+# maintaining their own copies.  (Audit finding P0-1 / P0-3.)
+WALL_TYPE_REGISTRY = {
+    NoSlipWall.type_name:    NoSlipWall,
+    FreeSlipWall.type_name:  FreeSlipWall,
+    InletWall.type_name:     InletWall,
+    OutletWall.type_name:    OutletWall,
+    PeriodicWall.type_name:  PeriodicWall,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -156,10 +380,10 @@ class BoundaryConditions:
 
         # Build per-wall dict, converting scalars to NoSlipWall
         self.walls = {
-            'top': self._to_wall(top, NoSlipWall, u=1.0),
+            'top':    self._to_wall(top,    NoSlipWall, u=1.0),
             'bottom': self._to_wall(bottom, NoSlipWall, u=0.0),
-            'left': self._to_wall(left, NoSlipWall, v=0.0),
-            'right': self._to_wall(right, NoSlipWall, v=0.0),
+            'left':   self._to_wall(left,   NoSlipWall, v=0.0),
+            'right':  self._to_wall(right,  NoSlipWall, v=0.0),
         }
 
         # Sync legacy float attributes from the wall objects
@@ -229,9 +453,9 @@ class BoundaryConditions:
     def apply(self, u, v, Nx: int, Ny: int):
         """Set boundary values on velocity components.
 
-        Dispatches to per-wall-type handlers.  For backward compatibility
-        all walls default to :class:`NoSlipWall` and produce identical
-        results to the original implementation.
+        Delegates to each wall's ``apply_*`` method.  Adding a new wall
+        type no longer requires modifying this method — the new WallType
+        subclass just implements the four ``apply_*`` methods.
 
         Parameters
         ----------
@@ -242,86 +466,10 @@ class BoundaryConditions:
         Nx, Ny : int
             Number of cells in each direction.
         """
-        # --- Top wall (j = Ny) ---
-        wall = self.walls['top']
-        if isinstance(wall, PeriodicWall):
-            # y-periodic: top ghost = bottom interior
-            u[:, -1] = u[:, 1]
-        elif isinstance(wall, InletWall):
-            # Normal velocity (v) at top face
-            v[1:-1, Ny] = self._inlet_profile(wall, Ny, axis='y')
-            # Tangential u: ghost-cell Dirichlet
-            u[:, -1] = 2.0 * 0.0 - u[:, -2]
-        elif isinstance(wall, OutletWall):
-            v[1:-1, Ny] = v[1:-1, Ny - 1]  # zero-gradient
-            u[:, -1] = u[:, -2]              # zero-gradient
-        elif isinstance(wall, FreeSlipWall):
-            v[1:-1, Ny] = 0.0
-            u[:, -1] = u[:, -2]              # free-slip: ghost = interior
-        else:
-            # NoSlipWall (default)
-            v[1:-1, Ny] = 0.0
-            if self.smooth_lid:
-                u[:, -1] = 2.0 * self._get_lid_profile(Nx) - u[:, -2]
-            else:
-                u[:, -1] = 2.0 * self.top - u[:, -2]
-
-        # --- Bottom wall (j = 0) ---
-        wall = self.walls['bottom']
-        if isinstance(wall, PeriodicWall):
-            # y-periodic: bottom ghost = top interior
-            u[:, 0] = u[:, Ny]
-            v[1:-1, 0] = v[1:-1, Ny]
-        elif isinstance(wall, InletWall):
-            v[1:-1, 0] = self._inlet_profile(wall, Ny, axis='y')
-            u[:, 0] = 2.0 * 0.0 - u[:, 1]
-        elif isinstance(wall, OutletWall):
-            v[1:-1, 0] = v[1:-1, 1]
-            u[:, 0] = u[:, 1]
-        elif isinstance(wall, FreeSlipWall):
-            v[1:-1, 0] = 0.0
-            u[:, 0] = u[:, 1]
-        else:
-            v[1:-1, 0] = 0.0
-            u[:, 0] = 2.0 * self.bottom - u[:, 1]
-
-        # --- Left wall (i = 0) ---
-        wall = self.walls['left']
-        if isinstance(wall, PeriodicWall):
-            # x-periodic: left ghost = right interior
-            v[0, :] = v[Nx, :]
-            u[0, 1:-1] = u[Nx, 1:-1]
-        elif isinstance(wall, InletWall):
-            u[0, 1:-1] = self._inlet_profile(wall, Ny, axis='x')
-            v[0, :] = 2.0 * 0.0 - v[1, :]
-        elif isinstance(wall, OutletWall):
-            u[0, 1:-1] = u[1, 1:-1]
-            v[0, :] = v[1, :]
-        elif isinstance(wall, FreeSlipWall):
-            u[0, 1:-1] = 0.0
-            v[0, :] = v[1, :]
-        else:
-            u[0, 1:-1] = 0.0
-            v[0, :] = 2.0 * self.left - v[1, :]
-
-        # --- Right wall (i = Nx) ---
-        wall = self.walls['right']
-        if isinstance(wall, PeriodicWall):
-            # x-periodic: right ghost = left interior
-            v[-1, :] = v[1, :]
-            u[Nx, 1:-1] = u[0, 1:-1]
-        elif isinstance(wall, InletWall):
-            u[Nx, 1:-1] = self._inlet_profile(wall, Ny, axis='x')
-            v[-1, :] = 2.0 * 0.0 - v[-2, :]
-        elif isinstance(wall, OutletWall):
-            u[Nx, 1:-1] = u[Nx - 1, 1:-1]
-            v[-1, :] = v[-2, :]
-        elif isinstance(wall, FreeSlipWall):
-            u[Nx, 1:-1] = 0.0
-            v[-1, :] = v[-2, :]
-        else:
-            u[Nx, 1:-1] = 0.0
-            v[-1, :] = 2.0 * self.right - v[-2, :]
+        self.walls['top'].apply_top(u, v, Nx, Ny, self)
+        self.walls['bottom'].apply_bottom(u, v, Nx, Ny, self)
+        self.walls['left'].apply_left(u, v, Nx, Ny, self)
+        self.walls['right'].apply_right(u, v, Nx, Ny, self)
 
     def _inlet_profile(self, wall, N, axis='x'):
         """Compute inlet velocity profile at boundary face positions.
@@ -364,3 +512,10 @@ class BoundaryConditions:
             return self._get_lid_profile(Nx)
         return self.top
 
+    def has_periodic(self):
+        """Return True if any wall is a :class:`PeriodicWall`."""
+        return any(isinstance(w, PeriodicWall) for w in self.walls.values())
+
+    def has_outlet(self):
+        """Return True if any wall is an :class:`OutletWall`."""
+        return any(isinstance(w, OutletWall) for w in self.walls.values())

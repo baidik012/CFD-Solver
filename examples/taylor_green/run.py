@@ -12,12 +12,12 @@ import os
 import sys
 import argparse
 import numpy as np
-import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from cfd_solver.solver import Solver
 from cfd_solver.solver.bc import BoundaryConditions, FreeSlipWall, PeriodicWall
+from cfd_solver.config_loader import load_config
 
 
 def taylor_green_ic(mesh):
@@ -56,8 +56,9 @@ def main():
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = args.config or os.path.join(script_dir, "config.yaml")
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    # load_config() validates the YAML schema before returning.
+    # (Audit finding P1-6 — examples previously skipped validation.)
+    cfg = load_config(config_path)
 
     geo = cfg["geometry"]
     Nx, Ny = geo["Nx"], geo["Ny"]

@@ -134,28 +134,14 @@ class CrankNicolson:
 
     @staticmethod
     def _ghost_cell_coeffs(wall, component='u'):
-        """Return (diag_extra, rhs_coeff, wall_value) for a wall type.
+        """Return (has_dirichlet, wall_value) for the implicit Laplacian.
 
-        For NoSlipWall: ghost = 2*u_wall - interior
-            → diagonal += coeff, rhs += 2*coeff*u_wall
-        For FreeSlipWall: ghost = interior
-            → diagonal += 0, rhs += 0
-        For InletWall / OutletWall tangential component:
-            Same as NoSlip with u_wall=0 (tangential velocity is zero).
-        For PeriodicWall: caller handles separately.
+        .. deprecated:: 
+            This static method is preserved for backward compatibility but
+            now simply delegates to ``wall.ghost_cell_coeffs(component)``.
+            New code should call the wall object's method directly.
         """
-        from .bc import NoSlipWall, FreeSlipWall, InletWall, OutletWall
-        if isinstance(wall, NoSlipWall):
-            val = wall.u if component == 'u' else wall.v
-            return (True, val)
-        elif isinstance(wall, FreeSlipWall):
-            return (False, 0.0)
-        elif isinstance(wall, (InletWall, OutletWall)):
-            # Tangential component is zero at inlet/outlet
-            return (True, 0.0)
-        else:
-            # Default: treat as NoSlip
-            return (True, 0.0)
+        return wall.ghost_cell_coeffs(component)
 
     def _build_u_matrix(self):
         """Build the (I - 0.5*dt*nu*L) operator for u unknowns.
@@ -185,14 +171,14 @@ class CrankNicolson:
         # Bottom wall (j=1, matrix index 0)
         bottom_wall = self.bc.walls.get('bottom')
         if bottom_wall is not None and not isinstance(bottom_wall, PeriodicWall):
-            has_noslip, val = self._ghost_cell_coeffs(bottom_wall, 'u')
+            has_noslip, val = bottom_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 diag_j[0] += ry  # ghost cell adds +ry to diagonal
 
         # Top wall (j=Ny, matrix index -1)
         top_wall = self.bc.walls.get('top')
         if top_wall is not None and not isinstance(top_wall, PeriodicWall):
-            has_noslip, val = self._ghost_cell_coeffs(top_wall, 'u')
+            has_noslip, val = top_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 diag_j[-1] += ry  # ghost cell adds +ry to diagonal
 
@@ -222,14 +208,14 @@ class CrankNicolson:
         # Left wall (i=1, matrix index 0)
         left_wall = self.bc.walls.get('left')
         if left_wall is not None and not isinstance(left_wall, PeriodicWall):
-            has_noslip, val = self._ghost_cell_coeffs(left_wall, 'v')
+            has_noslip, val = left_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 diag_i[0] += rx
 
         # Right wall (i=Nx, matrix index -1)
         right_wall = self.bc.walls.get('right')
         if right_wall is not None and not isinstance(right_wall, PeriodicWall):
-            has_noslip, val = self._ghost_cell_coeffs(right_wall, 'v')
+            has_noslip, val = right_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 diag_i[-1] += rx
 
@@ -313,13 +299,13 @@ class CrankNicolson:
         # y-direction (via ghost cells)
         bottom_wall = self.bc.walls.get('bottom')
         if bottom_wall is not None:
-            has_noslip, val = self._ghost_cell_coeffs(bottom_wall, 'u')
+            has_noslip, val = bottom_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 rhs_u[:, 0] += 2.0 * ry * val
 
         top_wall = self.bc.walls.get('top')
         if top_wall is not None:
-            has_noslip, val = self._ghost_cell_coeffs(top_wall, 'u')
+            has_noslip, val = top_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 if self.bc.smooth_lid:
                     rhs_u[:, -1] += 2.0 * ry * self.bc._get_lid_profile(Nx)[1:-1]
@@ -336,13 +322,13 @@ class CrankNicolson:
         # x-direction (via ghost cells)
         left_wall = self.bc.walls.get('left')
         if left_wall is not None:
-            has_noslip, val = self._ghost_cell_coeffs(left_wall, 'v')
+            has_noslip, val = left_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 rhs_v[0, :] += 2.0 * rx * val
 
         right_wall = self.bc.walls.get('right')
         if right_wall is not None:
-            has_noslip, val = self._ghost_cell_coeffs(right_wall, 'v')
+            has_noslip, val = right_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 rhs_v[-1, :] += 2.0 * rx * val
 
@@ -398,15 +384,14 @@ class FFTCrankNicolson:
         self._build_eigenvalues()
 
     def _is_noslip(self, wall):
-        """Check if a wall behaves as NoSlip for the implicit Laplacian."""
-        from .bc import NoSlipWall, InletWall, OutletWall, PeriodicWall
-        if isinstance(wall, PeriodicWall):
-            return False
-        if isinstance(wall, NoSlipWall):
-            return True
-        if isinstance(wall, (InletWall, OutletWall)):
-            return True  # tangential component is zero
-        return True  # default: treat as NoSlip
+        """Check if a wall behaves as NoSlip for the implicit Laplacian.
+
+        Delegates to ``wall.is_noslip()``.  PeriodicWall returns False
+        (handled separately by the caller).
+        """
+        if wall is None:
+            return True  # default: treat as NoSlip
+        return wall.is_noslip()
 
     def _build_eigenvalues(self):
         """Compute DST/DCT eigenvalues based on current wall types."""

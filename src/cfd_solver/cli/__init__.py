@@ -14,20 +14,18 @@ import numpy as np
 from cfd_solver.solver import Solver
 from cfd_solver.solver.bc import (
     BoundaryConditions, NoSlipWall, FreeSlipWall,
-    InletWall, OutletWall, PeriodicWall,
+    InletWall, OutletWall, PeriodicWall, WALL_TYPE_REGISTRY,
 )
-from cfd_solver.solver.validate import validate_config
+from cfd_solver.solver.validate import validate_config, WALL_TYPE_VALUES
 from cfd_solver.solver.viz import save_contour, save_quiver
+from cfd_solver.config_loader import load_config
 from cfd_solver.utils import handle_error
 
 
-_WALL_TYPE_MAP = {
-    "wall": NoSlipWall,
-    "free_slip": FreeSlipWall,
-    "inlet": InletWall,
-    "outlet": OutletWall,
-    "periodic": PeriodicWall,
-}
+# Wall-type lookup derived from the single source of truth in bc.py.
+# (Audit finding P0-1 / P0-3 — previously this was a hand-maintained
+# duplicate of the same mapping.)
+_WALL_TYPE_MAP = WALL_TYPE_REGISTRY
 
 
 def _parse_boundary_config(bc_cfg):
@@ -138,24 +136,24 @@ def run(args):
             print(f"Error: checkpoint not found: {args.resume}")
             raise SystemExit(1)
         solver = Solver.from_checkpoint(args.resume)
-        with open(args.config) as f:
-            cfg = yaml.safe_load(f) or {}
+        # Config is optional when resuming — only load if provided.
+        if args.config:
+            cfg = load_config(args.config)
+        else:
+            cfg = {}
     else:
         # Start a new simulation from a config file
+        if args.config is None:
+            print("Error: config file required (or use --resume to load a checkpoint)",
+                  file=sys.stderr)
+            raise SystemExit(1)
         if not os.path.exists(args.config):
             print(f"Error: config file not found: {args.config}")
             raise SystemExit(1)
 
-        with open(args.config) as f:
-            cfg = yaml.safe_load(f)
-
-        # Validate the configuration schema
-        errors = validate_config(cfg)
-        if errors:
-            print("Config validation errors:", file=sys.stderr)
-            for e in errors:
-                print(f"  - {e}", file=sys.stderr)
-            raise SystemExit(1)
+        # load_config() runs validate_config() and exits with clear
+        # error messages on schema failure. (Audit finding P1-5.)
+        cfg = load_config(args.config)
 
         # Extract parameters from config
         geo = cfg["geometry"]
@@ -277,15 +275,26 @@ def main():
     """
     from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
+
+    # Pre-scan argv for --no-update-check so we can skip the network call
+    # before constructing the full argparse parser.  (Audit finding P2-14.)
+    # The env var CFD_SOLVER_NO_UPDATE_CHECK=1 has the same effect.
+    if "--no-update-check" in sys.argv:
+        os.environ["CFD_SOLVER_NO_UPDATE_CHECK"] = "1"
     check_for_updates()
 
     parser = argparse.ArgumentParser(description=f"CFD Solver v{__version__}")
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--no-update-check", action="store_true",
+        help="Skip the git update check (also set via CFD_SOLVER_NO_UPDATE_CHECK=1)",
+    )
     sub = parser.add_subparsers(required=True)
 
     # 'run' subcommand
     run_parser = sub.add_parser("run", help="Run a simulation")
-    run_parser.add_argument("config", help="YAML config file")
+    run_parser.add_argument("config", nargs="?", default=None,
+                            help="YAML config file (optional with --resume)")
     run_parser.add_argument(
         "--output", "-o", default="output/result.png",
         help="Output plot path (default: output/result.png)",
