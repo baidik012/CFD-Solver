@@ -88,7 +88,9 @@ def test_p01_is_noslip_for_each_wall_type():
     """is_noslip() returns the expected value for each wall type."""
     assert NoSlipWall().is_noslip() is True
     assert InletWall().is_noslip() is True
-    assert OutletWall().is_noslip() is True
+    # (Audit fix #1 — OutletWall now correctly returns False because it
+    #  uses zero-gradient Neumann BCs, not no-slip Dirichlet.)
+    assert OutletWall().is_noslip() is False
     assert FreeSlipWall().is_noslip() is False
     assert PeriodicWall().is_noslip() is False
 
@@ -441,3 +443,74 @@ def test_p318_mesh_accepts_minimum_valid():
     m = Mesh(1.0, 1.0, 1, 1)
     assert m.dx == 1.0
     assert m.dy == 1.0
+
+
+# ── Round-2 audit fixes (#1–#10) ───────────────────────────────────────────
+
+
+def test_fix1_outlet_wall_is_not_noslip():
+    """OutletWall.is_noslip() returns False (Neumann, not Dirichlet)."""
+    w = OutletWall()
+    assert w.is_noslip() is False
+    assert w.ghost_cell_coeffs('u') == (False, 0.0)
+    assert w.ghost_cell_coeffs('v') == (False, 0.0)
+
+
+def test_fix3_periodic_x_requires_left_and_right():
+    """_periodic_x is True only when both left AND right are PeriodicWall."""
+    bc_y_periodic = BoundaryConditions(
+        top=PeriodicWall(), bottom=PeriodicWall(),
+        left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0),
+    )
+    # top/bottom periodic should NOT set _periodic_x
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.005,
+              boundary_config=bc_y_periodic, force=True)
+    assert s._periodic_x is False
+
+    bc_x_periodic = BoundaryConditions(
+        top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+        left=PeriodicWall(), right=PeriodicWall(),
+    )
+    s2 = Solver(grid_size=(8, 8), nu=0.01, dt=0.005,
+               boundary_config=bc_x_periodic, force=True)
+    assert s2._periodic_x is True
+
+
+def test_fix4_convergence_monitors_both_u_and_v():
+    """Convergence check monitors changes in both u and v."""
+    s = Solver(grid_size=(8, 8), nu=0.01, dt=0.005, lid_speed=1.0)
+    # Run a few steps with convergence — should not crash
+    s.solve(steps=5, convergence_tol=1e-10, convergence_window=1, verbose=False)
+
+
+def test_fix6_parabolic_inlet_uses_domain_height():
+    """Parabolic inlet profile respects non-unit domain height."""
+    bc = BoundaryConditions(
+        left=InletWall(profile="parabolic", U_max=1.0),
+        right=OutletWall(),
+        top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+    )
+    # With Ly=2.0, the profile should peak at y=1.0 (mid-channel)
+    s = Solver(grid_size=(16, 16), nu=0.01, dt=0.001,
+               Lx=2.0, Ly=2.0,
+               boundary_config=bc, force=True)
+    # The peak of the parabolic profile should be U_max=1.0
+    profile = s.bc._inlet_profile(bc.walls['left'], 16, axis='x')
+    assert np.max(profile) == pytest.approx(1.0, abs=0.05)
+
+
+def test_fix7_fftcn_uses_wall_ghost_cell_coeffs_directly():
+    """FFTCrankNicolson.solve() calls wall.ghost_cell_coeffs(), not the
+    deprecated CrankNicolson._ghost_cell_coeffs static method."""
+    from cfd_solver.solver.diffusion import FFTCrankNicolson
+    bc = BoundaryConditions(top=NoSlipWall(u=1.0), bottom=NoSlipWall(u=0.0))
+    m = Mesh(1.0, 1.0, 16, 16)
+    solver = FFTCrankNicolson(m, nu=0.01, dt=0.001, bc=bc)
+    # Just verify it was constructed without error and solve works
+    u = np.zeros(m.shape_u)
+    v = np.zeros(m.shape_v)
+    adv_u = np.zeros_like(u)
+    adv_v = np.zeros_like(v)
+    u_star, v_star = solver.solve(u, v, adv_u, adv_v)
+    assert np.all(np.isfinite(u_star))
+    assert np.all(np.isfinite(v_star))

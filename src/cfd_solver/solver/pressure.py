@@ -402,7 +402,7 @@ def create_pressure_solver(mesh, bc=None):
         # isinstance checks here. (Audit finding P0-1.)
         if bc.has_periodic():
             return PeriodicPressureSolver(mesh)
-        if bc.has_outlet() or mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
+        if bc.has_outlet() or (mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD):
             return PressureSolver(mesh, bc=bc)
 
     if mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:

@@ -66,12 +66,16 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     save_contour(solver.mesh, solver.u, solver.v, solver.p, out)
 
+    # (Audit fix #8 — previously hardcoded l2=0.0, linf=0.0 which was
+    #  misleading.  Now we report only the divergence and note that
+    #  error norms require a reference solution.)
     print_error_report(
         "Lid-Driven Cavity",
-        l2=0.0, linf=0.0,
+        l2=float('nan'), linf=float('nan'),
         divergence=solver.max_divergence(),
         grid=f"{solver.Nx}x{solver.Ny}",
-        extra={"Time": f"{solver.time:.1f}s", "Output": out},
+        extra={"Time": f"{solver.time:.1f}s", "Output": out,
+               "Note": "l2/linf require reference data (see validate.py)"},
     )
 
 

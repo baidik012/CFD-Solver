@@ -96,9 +96,10 @@ def run_body_force(cfg, output_path):
 
     save_contour(solver.mesh, solver.u, solver.v, solver.p, output_path)
 
+    # (Audit fix #8 — previously hardcoded l2=0.0, linf=0.0.)
     print_error_report(
         "Channel Flow (Body Force, Closed Box)",
-        l2=0.0, linf=0.0,
+        l2=float('nan'), linf=float('nan'),
         divergence=solver.max_divergence(),
         grid=f"{solver.Nx}x{solver.Ny}",
         extra={

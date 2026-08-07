@@ -142,6 +142,12 @@ class Solver:
         else:
             self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
 
+        # Propagate domain size to BC object so that inlet profiles can
+        # use the correct channel height/length instead of assuming H=1.
+        # (Audit fix #6 — parabolic inlet profile used hardcoded H=1.0.)
+        self.bc._domain_width = Lx
+        self.bc._domain_height = Ly
+
         # Stability check: CFL and diffusion constraints.
         # IMPORTANT: Flow velocities can reach 2-3x the lid speed due to recirculation.
         # We use a conservative limit to prevent blowup.
@@ -192,7 +198,11 @@ class Solver:
         self.diffusion_scheme = diffusion_scheme
 
         # Detect periodic directions
-        self._periodic_x = any(isinstance(w, PeriodicWall) for w in self.bc.walls.values())
+        # Previously checked ANY wall, including top/bottom, which would
+        # incorrectly activate x-periodic logic for y-periodic BCs.
+        # (Audit fix #3.)
+        self._periodic_x = (isinstance(self.bc.walls.get('left'), PeriodicWall) and
+                            isinstance(self.bc.walls.get('right'), PeriodicWall))
 
         # Initialize velocity and pressure arrays
         self.u = np.zeros(self.mesh.shape_u)
@@ -319,13 +329,20 @@ class Solver:
             v_star += dt * fv
 
         # Periodic x: the advection/diffusion step doesn't update u_star
-        # at the boundary face (i=0/i=Nx), so we compute the diffusion
-        # contribution there using the wrapping Laplacian.
+        # at the boundary face (i=0/i=Nx), so we compute the full
+        # prediction (advection + diffusion) there using the wrapping
+        # Laplacian.
+        # Previously only diffusion was applied, discarding the advection
+        # term — a physical error that caused missing momentum at the
+        # periodic boundary.  Also, the Laplacian mixed u_star and self.u
+        # inconsistently.  Now we use self.u consistently (explicit eval)
+        # and include the advection term.
+        # (Audit fixes #2 and #5.)
         if self._periodic_x:
             dx2, dy2 = dx**2, dy**2
-            lap_u_0 = (u_star[1, 1:-1] - 2.0 * self.u[0, 1:-1] + u_star[-2, 1:-1]) / dx2 + \
+            lap_u_0 = (self.u[1, 1:-1] - 2.0 * self.u[0, 1:-1] + self.u[-2, 1:-1]) / dx2 + \
                       (self.u[0, 2:] - 2.0 * self.u[0, 1:-1] + self.u[0, :-2]) / dy2
-            u_star[0, 1:-1] = self.u[0, 1:-1] + dt * self.nu * lap_u_0
+            u_star[0, 1:-1] = self.u[0, 1:-1] + dt * (-adv_u[0, 1:-1] + self.nu * lap_u_0)
             u_star[-1, 1:-1] = u_star[0, 1:-1]
 
         # 2. Pressure Step: Solve ∇²p = (∇·u*) / dt
@@ -402,6 +419,7 @@ class Solver:
         c = 0.0
         converged_count = 0
         u_old = self.u.copy() if convergence_tol is not None else None
+        v_old = self.v.copy() if convergence_tol is not None else None
         for i in range(steps):
             self.step()
 
@@ -424,21 +442,28 @@ class Solver:
                 return False
 
             # Steady-state convergence check
+            # Previously only monitored u, ignoring v — could declare
+            # convergence prematurely while v is still evolving.
+            # (Audit fix #4.)
             if convergence_tol is not None:
-                delta = np.max(np.abs(self.u - u_old))
+                delta_u = np.max(np.abs(self.u - u_old))
+                delta_v = np.max(np.abs(self.v - v_old))
+                delta = max(delta_u, delta_v)
                 if delta < convergence_tol:
                     converged_count += 1
                     if converged_count >= convergence_window:
                         if verbose:
                             sys.stdout.write(
                                 f"\n  Converged at step {i+1}: "
-                                f"max|du|={delta:.2e} < {convergence_tol:.2e} "
+                                f"max|du|={delta_u:.2e}, max|dv|={delta_v:.2e} "
+                                f"< {convergence_tol:.2e} "
                                 f"for {convergence_window} steps\n"
                             )
                         return True
                 else:
                     converged_count = 0
                 u_old[:] = self.u
+                v_old[:] = self.v
 
             if verbose:
                 bar_len = 30
