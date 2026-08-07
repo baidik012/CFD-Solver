@@ -286,11 +286,18 @@ class OutletWall(WallType):
         v[-1, :] = v[-2, :]
 
     def is_noslip(self):
-        # Tangential component is zero (Dirichlet) → treated as NoSlip for DST.
-        return True
+        # Outlet uses zero-gradient (Neumann) BCs, NOT Dirichlet.
+        # The apply_* methods use zero-gradient, so the implicit Laplacian
+        # must also use Neumann (ghost = interior) to stay consistent.
+        # Previously returned True / (True, 0.0) which caused the
+        # Crank-Nicolson solver to build a Dirichlet (no-slip, u=0)
+        # matrix at the outlet, creating an unphysical boundary layer.
+        # (Audit fix #1.)
+        return False
 
     def ghost_cell_coeffs(self, component='u'):
-        return (True, 0.0)
+        # Neumann: ghost = interior → (False, 0.0)
+        return (False, 0.0)
 
 
 class PeriodicWall(WallType):
@@ -496,9 +503,13 @@ class BoundaryConditions:
         # Parabolic profile: u(y) = 4 * U_max * y * (H - y) / H^2
         # Evaluated at face positions.  For a channel of height H, the
         # interior faces are at y_j = (j + 0.5) * dy, j = 0 .. N-1.
-        H = 1.0  # normalised; caller rescales via U_max
-        y = (np.arange(N) + 0.5) / N  # y/H in [0, 1]
-        return 4.0 * wall.U_max * y * (1.0 - y)
+        # Previously H was hardcoded to 1.0, which produced incorrect
+        # profiles for non-unit domain heights.  Now we use the actual
+        # domain size stored on the BoundaryConditions object.
+        # (Audit fix #6.)
+        H = self._domain_height if hasattr(self, '_domain_height') else 1.0
+        y = (np.arange(N) + 0.5) / N * H  # physical y in [0, H]
+        return 4.0 * wall.U_max * y * (H - y) / (H ** 2)
 
     def lid_values(self, Nx: int):
         """Return the tangential lid u-values at face positions.

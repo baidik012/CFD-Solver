@@ -498,13 +498,13 @@ class FFTCrankNicolson:
         # y-direction RHS boundary contributions
         bottom_wall = self.bc.walls.get('bottom')
         if bottom_wall is not None:
-            has_noslip, val = CrankNicolson._ghost_cell_coeffs(bottom_wall, 'u')
+            has_noslip, val = bottom_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 rhs_u[:, 0] += 2.0 * ry * val
 
         top_wall = self.bc.walls.get('top')
         if top_wall is not None:
-            has_noslip, val = CrankNicolson._ghost_cell_coeffs(top_wall, 'u')
+            has_noslip, val = top_wall.ghost_cell_coeffs('u')
             if has_noslip:
                 if self.bc.smooth_lid:
                     rhs_u[:, -1] += 2.0 * ry * self.bc._get_lid_profile(Nx)[1:-1]
@@ -527,13 +527,13 @@ class FFTCrankNicolson:
         # x-direction RHS boundary contributions
         left_wall = self.bc.walls.get('left')
         if left_wall is not None:
-            has_noslip, val = CrankNicolson._ghost_cell_coeffs(left_wall, 'v')
+            has_noslip, val = left_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 rhs_v[0, :] += 2.0 * rx * val
 
         right_wall = self.bc.walls.get('right')
         if right_wall is not None:
-            has_noslip, val = CrankNicolson._ghost_cell_coeffs(right_wall, 'v')
+            has_noslip, val = right_wall.ghost_cell_coeffs('v')
             if has_noslip:
                 rhs_v[-1, :] += 2.0 * rx * val
 
@@ -571,5 +571,11 @@ def create_diffusion_solver(mesh, nu, dt, bc, threshold=128):
         Either :class:`CrankNicolson` or :class:`FFTCrankNicolson`.
     """
     if max(mesh.Nx, mesh.Ny) >= threshold:
-        return FFTCrankNicolson(mesh, nu, dt, bc)
+        try:
+            return FFTCrankNicolson(mesh, nu, dt, bc)
+        except ValueError:
+            #* FFTCrankNicolson does not support mixed NoSlip/FreeSlip
+            #  (or NoSlip/Outlet) BC combinations. Fall back to the
+            #  sparse CrankNicolson solver which handles all BC types.
+            pass
     return CrankNicolson(mesh, nu, dt, bc)

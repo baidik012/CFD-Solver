@@ -20,19 +20,11 @@ Backend note (audit finding P2-9):
 import os
 import numpy as np
 import matplotlib
-# Only switch to Agg if the user has not already chosen a backend.
-# This preserves interactive notebook backends (%matplotlib inline,
-# ipympl, etc.) while still working headless on a server.
-if matplotlib.get_backend().lower() not in ('agg',):
-    # The first import of pyplot freezes the backend, so we must set
-    # it before pyplot is imported.  ``force=False`` means: only set
-    # if no backend has been chosen yet.
-    try:
-        matplotlib.use('Agg', force=False)
-    except Exception:
-        # If a backend is already locked in, just continue — the
-        # savefig calls below will use whatever is active.
-        pass
+# (Audit fix #9 — previously the logic was self-contradictory: an `if`
+#  guard checked that the backend was not Agg, but then used force=False
+#  which silently did nothing when a backend was already chosen.  The
+#  correct pattern is simply: set Agg only if no backend is locked in.)
+matplotlib.use('Agg', force=False)
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
