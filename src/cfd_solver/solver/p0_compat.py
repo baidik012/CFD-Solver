@@ -22,7 +22,10 @@ from .p0_fixes import (
     create_pressure_solver_p0,
 )
 
-_BaseSolver = solver_module.Solver
+# p0_fixes replaces solver_module.Solver with P0Solver. Recover the original
+# numerical Solver implementation through P0Solver's immediate base class so
+# this compatibility layer can bypass only the erroneous P0 constructor guard.
+_BaseSolver = P0Solver.__mro__[1]
 
 
 class CompatiblePeriodicPressureSolver(GeneralPeriodicPressureSolver):
@@ -54,8 +57,6 @@ class CorrectedP0Solver(P0Solver):
         else:
             px = py = False
 
-        # Call the original Solver implementation, bypassing only the P0
-        # constructor guard. All P0 step/projection fixes remain inherited.
         _BaseSolver.__init__(self, *args, **kwargs)
         self._periodic_x = px
         self._periodic_y = py
