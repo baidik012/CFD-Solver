@@ -100,9 +100,7 @@ def main():
     if args.output:
         out = args.output
     else:
-        out_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        os.makedirs(out_dir, exist_ok=True)
-        out = os.path.join(out_dir, "taylor_green_result.png")
+        out = os.path.join(script_dir, "..", "..", "output", "taylor_green", "result.png")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     s.save(out)
     print(f"  Saved to {out}")
