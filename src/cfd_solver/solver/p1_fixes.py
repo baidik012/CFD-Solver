@@ -28,13 +28,7 @@ from .p0_fixes import (
 
 
 class LegacyPeriodicPressureSolver(GeneralPeriodicPressureSolver):
-    """Backward-compatible periodic pressure solver API.
-
-    The legacy public class accepted only ``mesh`` and represented the
-    historical periodic-x/Neumann-y topology. The generalized class now
-    supports all periodic topologies, so this compatibility class accepts
-    optional topology flags while retaining the old one-argument form.
-    """
+    """Backward-compatible periodic pressure solver API."""
 
     def __init__(self, mesh, periodic_x=True, periodic_y=False):
         super().__init__(mesh, periodic_x=periodic_x, periodic_y=periodic_y)
@@ -53,8 +47,6 @@ def create_pressure_solver_p1(mesh, bc=None):
     return create_pressure_solver_p0(mesh, bc)
 
 
-# Keep both direct pressure-module imports and Solver construction on the
-# compatibility-aware factory/class.
 pressure_module.PeriodicPressureSolver = LegacyPeriodicPressureSolver
 pressure_module.create_pressure_solver = create_pressure_solver_p1
 solver_module.create_pressure_solver = create_pressure_solver_p1
@@ -79,7 +71,10 @@ from . import bc as bc_module
 bc_module.BoundaryConditions._inlet_profile = _p1_inlet_profile
 
 
-_BaseSolver = solver_module.Solver
+# p0_fixes has replaced solver_module.Solver with P0Solver. Its immediate base
+# is the original Solver implementation, which is what P1 needs in order to
+# bypass only the accidental P0 CN/Inlet/Outlet constructor guard.
+_BaseSolver = P0Solver.__mro__[1]
 
 
 class P1Solver(P0Solver):
@@ -92,10 +87,6 @@ class P1Solver(P0Solver):
         else:
             px = py = False
 
-        # Bypass P0Solver.__init__ deliberately. The merged P0 branch added
-        # a fail-fast CN+Inlet/Outlet guard, but the existing CN operator has
-        # wall ghost-cell support and the regression suite exercises that
-        # supported path. P1 must not regress that API.
         _BaseSolver.__init__(self, *args, **kwargs)
 
         self._periodic_x = px
