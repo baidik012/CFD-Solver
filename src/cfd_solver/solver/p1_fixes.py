@@ -19,6 +19,7 @@ import os
 import sys
 import numpy as np
 
+from . import solver as solver_module
 from .p0_fixes import P0Solver
 
 
@@ -32,7 +33,7 @@ class P1Solver(P0Solver):
     def solve(self, *args, **kwargs):
         """Run from the current state without re-applying an initial condition.
 
-        The base solver owns the actual time-stepping implementation.  We let
+        The base solver owns the actual time-stepping implementation. We let
         it perform the initial-condition application on the first call, then
         detach the callable so later calls continue from the current state.
         """
@@ -70,7 +71,7 @@ class P1Solver(P0Solver):
                         initial_condition=None, boundary_config=None):
         """Restore a checkpoint and preserve its physical simulation time.
 
-        Checkpoints created before P1 did not contain ``time``.  Those files
+        Checkpoints created before P1 did not contain ``time``. Those files
         remain readable, but are restored at ``t=0`` with a warning because the
         historical physical time cannot be reconstructed from the stored data.
         """
@@ -98,9 +99,13 @@ class P1Solver(P0Solver):
                     file=sys.stderr,
                 )
 
-        # A restored state is already initialized.  Never let a supplied
+        # A restored state is already initialized. Never let a supplied
         # initial-condition callable overwrite the checkpoint on the next
         # solve() call.
         solver._initial_condition_fn = None
         solver._initial_condition_applied = True
         return solver
+
+
+# Keep direct submodule imports consistent with the package-level Solver.
+solver_module.Solver = P1Solver
