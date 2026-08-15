@@ -351,7 +351,10 @@ def test_p214_cache_path_is_under_xdg_cache_home(monkeypatch):
     from cfd_solver.version_check import _cache_path
     monkeypatch.setenv('XDG_CACHE_HOME', '/tmp/fake-cache')
     path = _cache_path()
-    assert path.startswith('/tmp/fake-cache/cfd-solver/')
+    # Normalize both sides so the assertion holds on Windows too, where
+    # os.path.join mixes backslashes into the POSIX-style XDG_CACHE_HOME.
+    expected = os.path.normpath(os.path.join('/tmp/fake-cache', 'cfd-solver'))
+    assert os.path.normpath(path).startswith(expected)
 
 
 def test_p214_cache_is_fresh_after_touch(monkeypatch, tmp_path):

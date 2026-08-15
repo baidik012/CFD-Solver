@@ -1,164 +1,105 @@
 # Development Guide
 
-Notes on how the solver works and how to extend it.
+How the solver works and how to extend it.
 
 ## Project Structure
 
 ```
 CFD-Solver/
 ├── src/cfd_solver/
-│   ├── solver/
-│   │   ├── mesh.py             # Staggered grid generation
-│   │   ├── bc.py               # Boundary conditions (wall types + periodic)
-│   │   ├── advection.py        # Pluggable advection schemes
-│   │   ├── diffusion.py        # Explicit Euler, Crank-Nicolson, FFT Crank-Nicolson
-│   │   ├── pressure.py         # Poisson solver: splu + FFT + periodic spectral
-│   │   ├── diagnostics.py      # CFL, divergence, blowup detection
-│   │   ├── validate.py         # YAML config schema validation
-│   │   ├── solver.py           # Public API (Chorin step & Solver class)
-│   │   └── viz.py              # Visualization (quiver + contour)
-│   ├── utils.py                # Shared error handling utilities
-│   └── cli/
-│       └── __init__.py         # CLI entry point
-├── examples/                    # Example scripts and configs
-│   ├── cavity/                  # Lid-driven cavity
-│   ├── channel_flow/            # Poiseuille flow (inlet or body force)
-│   ├── couette/                 # Couette flow (periodic x)
-│   └── taylor_green/            # Taylor-Green vortex (periodic x)
-├── images/                      # Validation & example output plots
-├── tests/                       # Unit tests (132 tests)
-├── run_interactive.py           # Interactive parameter prompts
-├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
-├── setup.bat / setup.sh         # One-click environment setup
-├── run.bat / run.sh             # One-click solver launcher
-├── pyproject.toml               # Package config
-└── requirements.txt             # Dependencies
+│   ├── solver/           # Core numerical modules
+│   │   ├── mesh.py       # Staggered grid (C-grid)
+│   │   ├── bc.py         # Boundary conditions (WallType hierarchy)
+│   │   ├── advection.py  # Upwind & central schemes
+│   │   ├── diffusion.py  # Explicit, Crank-Nicolson (splu), FFT-CN (DST-I)
+│   │   ├── pressure.py   # Poisson: splu + FFT (DCT-II) + periodic spectral
+│   │   ├── diagnostics.py# CFL, divergence, blowup detection
+│   │   ├── validate.py   # YAML config schema
+│   │   ├── solver.py     # Public API: Chorin step, Solver class
+│   │   └── viz.py        # Visualization
+│   ├── cli/              # CLI entry point
+│   ├── config_loader.py  # Load + validate YAML
+│   ├── validation.py     # Error norms, convergence helpers
+│   ├── utils.py          # Friendly error handling
+│   └── version_check.py  # Cached git update check
+├── examples/             # Ready-to-run cases
+├── tests/                # 173 tests
+└── pyproject.toml
 ```
-
-## Architecture
-
-The solver is split into focused modules with clear responsibilities:
-
-| Module | Responsibility |
-|--------|---------------|
-| `mesh.py` | Grid generation, coordinate arrays, spacing |
-| `bc.py` | Boundary conditions: NoSlip, FreeSlip, Inlet, Outlet, Periodic |
-| `advection.py` | Upwind (1st order) & central (2nd order) schemes |
-| `diffusion.py` | Explicit Euler, Crank-Nicolson (splu), FFT Crank-Nicolson (DST-I) |
-| `pressure.py` | Poisson solver: splu + FFT (DCT-II) + Periodic (DFT+DCT) |
-| `diagnostics.py` | CFL, divergence norms, blowup detection |
-| `validate.py` | YAML config schema validation |
-| `solver.py` | Public API: Chorin step, `Solver` class, checkpoint/resume |
-| `viz.py` | Unified visualization (quiver + contour) |
-| `utils.py` | Shared error handling for CLI and interactive launcher |
 
 ## Core Concepts
 
 ### Staggered Grid (C-Grid)
-
 ```
-       v[j+1]
-    ──►──────
- u[i] │    P[i,j]
-    ──►──────
-       v[j]
+      v[j+1]
+   ──►──────
+u[i] │    P[i,j]
+   ──►──────
+      v[j]
 ```
+- `u` (x-velocity) at x-faces: `(Nx+1, Ny+2)`
+- `v` (y-velocity) at y-faces: `(Nx+2, Ny+1)`
+- `p` (pressure) at cell centers: `(Nx+2, Ny+2)`
 
-- `u` (x-velocity) stored at cell faces: `(Nx+1, Ny)`
-- `v` (y-velocity) stored at cell faces: `(Nx, Ny+1)`
-- `p` (pressure) stored at cell centers: `(Nx, Ny)`
+Eliminates checkerboard pressure instability.
 
-This arrangement avoids the "checkerboard" pressure instability that plagues colocated grids.
-
-### The Algorithm (Chorin Splitting)
-
-1. **Predictor** — Solve momentum without pressure:
-   ```
-   u* = u^n - dt*(u·∇)u + dt*ν∇²u
-   ```
-
-2. **Poisson** — Find pressure that enforces divergence-free:
-   ```
-   ∇²p = ∇·u* / dt
-   ```
-
-3. **Corrector** — Apply pressure gradient:
-   ```
-   u^{n+1} = u* - dt*∇p
-   ```
+### Algorithm (Chorin Splitting)
+1. **Predictor:** `u* = u^n - dt*(u·∇)u + dt*ν∇²u`
+2. **Poisson:** `∇²p = ∇·u* / dt`
+3. **Corrector:** `u^{n+1} = u* - dt*∇p`
 
 ### Boundary Conditions
-
 ```python
-from cfd_solver.solver import Solver
+from cfd_solver.solver import Solver, BoundaryConditions, NoSlipWall, InletWall, PeriodicWall
 
 # Constant lid
-s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0)
+s = Solver(grid_size=(64,64), nu=0.01, dt=0.001, lid_speed=1.0)
 
 # Smooth sinusoidal lid (removes corner singularity)
-s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0, smooth_lid=True)
+s = Solver(grid_size=(64,64), nu=0.01, dt=0.001, lid_speed=1.0, smooth_lid=True)
+
+# Per-wall objects (new API)
+bc = BoundaryConditions(
+    top=NoSlipWall(u=1.0),
+    bottom=NoSlipWall(u=0.0),
+    left=PeriodicWall(),
+    right=PeriodicWall(),
+)
+s = Solver(grid_size=(64,64), nu=0.01, dt=0.001, boundary_config=bc, force=True)
 ```
 
-The smooth lid applies `u(x) = U * sin(πx/L)` on the top wall — zero at corners, maximum in the center. This removes the velocity discontinuity that causes instabilities at fine grids.
+Smooth lid applies `u(x) = U * sin(πx/L)` — zero at corners, max at center.
 
-### Pluggable Advection Schemes
-
+### Advection Schemes
 ```python
-from cfd_solver.solver import Solver
-
-# First-order upwind (diffusive but stable)
-s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, advection_scheme="upwind")
-
-# Second-order central (less diffusive, may oscillate)
-s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, advection_scheme="central")
+s = Solver(..., advection_scheme="upwind")   # 1st order, diffusive, stable
+s = Solver(..., advection_scheme="central")  # 2nd order, less diffusive, may oscillate
 ```
 
-## Adding a New Advection Scheme
+### Adding a New Advection Scheme
+1. Add function in `advection.py` returning `(adv_u, adv_v)`
+2. Register in `solver.py` constructor: `self._advection_fn = advection.my_scheme`
+3. Add test in `tests/test_core.py`
 
-1. Add a function in `src/cfd_solver/solver/advection.py`:
-   ```python
-   def my_scheme(u, v, dx, dy):
-       """My custom advection scheme."""
-       adv_u = np.zeros_like(u)
-       adv_v = np.zeros_like(v)
-       # ... compute advection at interior faces ...
-       return adv_u, adv_v
-   ```
+## Verifying Results
 
-2. Register it in `src/cfd_solver/solver/solver.py`:
-   ```python
-   if advection_scheme == "my_scheme":
-       self._advection_fn = advection.my_scheme
-   ```
-
-3. Add a test in `tests/test_core.py`.
-
-## Verifying Your Results
-
-**Mass conservation** — The divergence should be near zero:
+**Mass conservation:**
 ```python
-print(f"Max divergence: {s.max_divergence():.2e}")
+print(f"Max divergence: {s.max_divergence():.2e}")   # ~1e-6
 print(f"L2 divergence: {s.divergence_norm():.2e}")
 ```
 
-**CFL stability** — Must be < 1:
+**CFL stability (must be < 1):**
 ```python
 print(f"CFL: {s.cfl():.3f}")
-if s.cfl() > 1:
-    print("WARNING: CFL > 1, reduce dt")
 ```
 
-**Reference data** — Lid-driven cavity has established benchmarks (Ghia et al., 1982). Use `run_ghia_validation.py` for a direct comparison:
+**Ghia benchmark (Re=100):**
 ```bash
-python run_ghia_validation.py
+python run_ghia_validation.py 100
 ```
-The script runs Re=100 (128×128 grid, 10 000 steps) and prints u- and v-centerline profiles for comparison against published Ghia tables.
 
 ## Stability Limits
-
-**Diffusion:** Crank-Nicolson semi-implicit scheme is unconditionally stable for any dt. No diffusion stability constraint.
-
-**Advection:** The 1st-order upwind advection is conditionally stable. At finer grids, the numerical dissipation per cell decreases, which can cause instabilities at high resolution. Practical limits:
 
 | Grid | Max stable dt | Notes |
 |------|--------------|-------|
@@ -166,91 +107,33 @@ The script runs Re=100 (128×128 grid, 10 000 steps) and prints u- and v-centerl
 | 64×64 | ~0.001 for 100+ steps | Advection limits long runs |
 | 128×128 | ~0.001 for ~30 steps | Advection instability earlier |
 
-Use `smooth_lid=True` (default) to push these limits further.
+Use `smooth_lid=True` (default) to push limits further.
 
-## Physics Conventions
+## Performance
 
-- All units are SI: meters, seconds, kg
-- Positive u is to the right, positive v is up
-- Pressure is relative — only pressure *differences* matter
-- Grid indexing: `u[i, j]` where i = x index, j = y index
+For grids > 128×128, auto-switches from sparse LU (`splu`) to **FFT spectral solvers** (DCT-II pressure, DST-I diffusion). Threshold: 128 cells.
 
-## Debugging
-
-If results look wrong:
-
-1. **Check CFL first.** Unstable simulations show diverging velocities.
-   ```python
-   if s.cfl() > 1:
-       print("Reduce dt!")
-   ```
-
-2. **Check divergence.** Non-zero divergence means pressure solver failed.
-   ```python
-   print(f"Divergence: {s.max_divergence():.2e}")  # should be ~1e-6
-   ```
-
-3. **Reduce resolution.** A 32x32 grid runs fast and reveals algorithm bugs.
-
-4. **Plot intermediate results.** Call `s.step()` once, inspect `s.u`, `s.v`, `s.p`.
-
-5. **Check the pressure solver.** The solver uses either a pre-factorized direct LU solve or an FFT-based spectral solve (auto-selected); if pressure values look wrong, check the Poisson matrix assembly in `pressure.py`.
-
-## Performance Tips
-
-For grids > 128×128, the solver automatically switches from sparse direct LU (`splu`) to **FFT-based spectral solvers** (DCT-II for pressure, DST-I for diffusion). This gives dramatic speedups:
-
-| Grid | splu (s/step) | FFT (s/step) | Speedup | Notes |
-|------|--------------|-------------|---------|-------|
-| 512×512 | 0.157 | 0.04 | ~4× | |
-| 1024×1024 | ~170 (total for small run) | 0.29 | ~600×+ | splu runs out of memory for pre-factorization |
-
-The factory functions `create_pressure_solver()` and `create_diffusion_solver()` automatically select the solver based on grid size (threshold: 128). No manual selection needed.
-
-**Time step constraints:** The upwind advection scheme requires `dt < dx/u_max` for CFL stability. At finer grids, `dx` shrinks and smaller `dt` is needed, increasing total step count:
-
-| Grid | Max stable dt | Steps for 60s sim time |
-|------|--------------|----------------------|
-| 64×64 | ~0.001 | 60,000 |
-| 128×128 | ~0.001 | 60,000 |
-| 512×512 | ~0.0005 | 120,000 |
-| 1024×1024 | ~0.0005 | 120,000 |
-
-Scaling is roughly O(N log N) for the FFT solvers where N = Nx × Ny. A 2× grid increase ~quadruples runtime.
+| Grid | splu | FFT | Speedup |
+|------|------|-----|---------|
+| 512×512 | 0.157 s/step | 0.04 s/step | ~4× |
+| 1024×1024 | OOM | 0.29 s/step | — |
 
 ## Checkpointing
 
-The solver can save and resume state:
-
 ```python
-# Save state after N steps
 s.checkpoint("output/run.npz")
-
-# Resume from checkpoint
 s = Solver.from_checkpoint("output/run.npz")
-s.solve(1000)  # continue running
+s.solve(1000)
 ```
 
-The `.npz` file stores `u`, `v`, `p`, and all solver parameters (`Nx`, `Ny`, `Lx`, `Ly`, `dt`, `nu`, `lid_speed`, `smooth_lid`, `advection_scheme`, `diffusion_scheme`). Missing optional keys fall back to defaults, so old checkpoints remain loadable.
+Stores `u, v, p` + all solver params. Old checkpoints remain loadable (missing keys → defaults).
 
 ## Running Tests
 
-First, activate the virtual environment and install dev dependencies:
 ```bash
-# Mac/Linux
-source venv/bin/activate
-
-# Windows (Command Prompt)
-venv\Scripts\activate
-
-# Windows (Git Bash)
-source venv/Scripts/activate
-```
-
-Then install dev dependencies and run:
-```bash
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ```
 
-All 128 tests should pass. Tests cover mesh construction, boundary conditions, advection schemes, diffusion, pressure solving, diagnostics, visualization, checkpoint/resume, the full Solver API, body forces, initial conditions, time tracking, convergence, periodic boundary conditions, and example validation.
+All 173 tests should pass. Coverage: mesh, BCs, advection, diffusion, pressure, diagnostics, viz, checkpoint/resume, Solver API, body forces, ICs, time tracking, convergence, periodic BCs, example validation.

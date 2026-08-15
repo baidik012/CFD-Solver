@@ -3,9 +3,6 @@
 Results from bundled simulation examples. Each example has a `config.yaml` and
 `run.py` in its directory under `examples/`.
 
-For detailed validation results, error analysis, and convergence studies, see
-[VALIDATION.md](VALIDATION.md).
-
 ---
 
 ## Lid-Driven Cavity
@@ -23,7 +20,18 @@ for incompressible Navier-Stokes solvers.
 python examples/cavity/run.py
 ```
 
-See [VALIDATION.md](VALIDATION.md#lid-driven-cavity) for Ghia benchmark comparison.
+### Validation: Ghia et al. (1982) Re=100
+
+| Location | Ghia u | CFD u | Error |
+|----------|--------|-------|-------|
+| Centerline u (x=0.5) | -0.2109 | -0.2087 | 1.0% |
+| Centerline v (y=0.5) | 0.1753 | 0.1731 | 1.3% |
+
+Primary/secondary vortex positions match within 2%.
+
+```bash
+python -m examples.cavity.validate
+```
 
 ---
 
@@ -52,7 +60,18 @@ constant up to numerical roundoff.
 python examples/couette/run.py
 ```
 
-See [VALIDATION.md](VALIDATION.md#couette-flow) for analytical solution comparison.
+### Validation: Fourier Series Solution (t=10s, 32x64)
+
+| Component | L2 error | L∞ error |
+|-----------|----------|----------|
+| u | 2.1e-3 | 4.8e-3 |
+
+Convergence rate: ~2nd order in space.
+
+```bash
+python -m examples.couette.validate
+python -m examples.couette.convergence
+```
 
 ---
 
@@ -67,24 +86,36 @@ exactly, making it ideal for convergence studies.
 - **Analytical:** u(x,y,t) = -U0 sin(kx*x) cos(ky*y) exp(-d*t), d = nu*(kx^2+ky^2)
 - **L2 error at t=2s:** 3.8e-2
 
-### Grid convergence
-
-| Grid | L2 error | Linf error |
-|------|----------|------------|
-| 16x16 | 6.9e-2 | 1.4e-1 |
-| 32x32 | 3.9e-2 | 7.9e-2 |
-| 64x64 | 2.0e-2 | 4.2e-2 |
-| 128x128 | 1.0e-2 | 2.1e-2 |
-
-Error halves with each refinement (second-order convergence).
-
 ![Taylor-Green Vortex](images/taylor_green_result.png)
 
 ```bash
 python examples/taylor_green/run.py
 ```
 
-See [VALIDATION.md](VALIDATION.md#taylor-green-vortex) for exact solution comparison and convergence study.
+### Validation: Exact Solution (t=2s, 64x64, nu=0.01)
+
+| Component | L2 error | L∞ error |
+|-----------|----------|----------|
+| u | 3.79e-2 | 7.59e-2 |
+| v | 3.79e-2 | 7.59e-2 |
+
+**Kinetic energy:** Numerical 1.95e-1, Analytical 2.31e-1.
+
+### Grid Convergence
+
+| Grid | L2 error | Rate |
+|------|----------|------|
+| 16x16 | 1.17e-1 | — |
+| 32x32 | 6.92e-2 | 0.76 |
+| 64x64 | 3.79e-2 | 0.87 |
+| 128x128 | 1.99e-2 | 0.93 |
+
+Convergence ~0.9 (first-order from explicit diffusion with periodic BCs).
+
+```bash
+python -m examples.taylor_green.validate
+python -m examples.taylor_green.convergence
+```
 
 ---
 
@@ -101,4 +132,16 @@ python examples/channel_flow/run.py --variant body-force
 python examples/channel_flow/run.py --variant inlet
 ```
 
-See [VALIDATION.md](VALIDATION.md#channel-flow-poiseuille) for parabolic profile comparison.
+### Validation: Parabolic Profile (t=10s, 64x64)
+
+| Variant | L2 error | L∞ error | U_max error |
+|---------|----------|----------|-------------|
+| Body force | 1.8e-3 | 3.2e-3 | 0.5% |
+| Inlet/Outlet | 2.1e-3 | 3.8e-3 | 0.7% |
+
+Convergence: ~2nd order in space.
+
+```bash
+python -m examples.channel_flow.validate
+python -m examples.channel_flow.convergence
+```

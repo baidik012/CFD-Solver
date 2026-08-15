@@ -71,7 +71,7 @@ Fluid accelerates from pressure differences and spreads out via viscosity.
 
 ## Validation
 
-The solver is validated against analytical solutions and published benchmark data. A detailed breakdown is available in [VALIDATION.md](VALIDATION.md).
+The solver is validated against analytical solutions and published benchmark data. See [EXAMPLES.md](EXAMPLES.md) for error metrics and convergence results per case.
 
 | Case | Reference | What it checks | Representative result |
 |------|-----------|----------------|-----------------------|
@@ -135,7 +135,7 @@ CFD-Solver/
 │   ├── couette/                 # Couette flow (periodic x)
 │   └── taylor_green/            # Taylor-Green vortex (periodic x)
 ├── images/                      # Validation & example output plots
-├── tests/                       # Unit tests (128 tests)
+├── tests/                       # Unit tests (173 tests)
 ├── run_interactive.py           # Interactive parameter setup
 ├── run_ghia_validation.py       # Ghia et al. (1982) benchmark validation
 ├── setup.bat / setup.sh         # One-click environment setup
