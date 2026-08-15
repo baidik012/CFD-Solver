@@ -30,12 +30,21 @@ See [VALIDATION.md](VALIDATION.md#lid-driven-cavity) for Ghia benchmark comparis
 ## Couette Flow
 
 Flow between two infinite parallel plates: bottom at rest, top moving at U=1.0.
-With periodic x BCs, the profile converges to the linear Couette solution.
+The bundled case uses periodic x boundaries, so there is no imposed streamwise
+pressure gradient. The velocity field evolves from rest toward the linear
+steady Couette profile.
+
+**Important:** the default `simulation_time` is 10 s, while the viscous
+diffusion time is `H^2/nu = 100 s`. Therefore the bundled image is a
+**transient** solution, not a steady-state solution. Its nonlinear-looking
+vertical profile is expected at this time. The pressure should remain spatially
+constant up to numerical roundoff.
 
 - **Grid:** 32x64, dt=0.001, nu=0.01
 - **BCs:** No-slip top/bottom, periodic left/right
-- **Analytical:** u(y) = U * y / H (steady state)
-- **L2 error at t=10s:** 6.8e-5
+- **Transient analytical solution:** Fourier series from rest
+- **Steady-state analytical solution:** u(y) = U * y / H
+- **Diffusion:** explicit (periodic Crank-Nicolson is not yet implemented)
 
 ![Couette Flow](images/couette_result.png)
 
