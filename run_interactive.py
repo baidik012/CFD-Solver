@@ -1,9 +1,9 @@
 """
 Interactive solver launcher — asks for parameters, runs simulation.
 
-This script provides a user-friendly way to configure and run the CFD solver
-interactively through the terminal. It prompts for physical and numerical
-parameters, executes the simulation, and displays the result.
+Provides a REPL-style loop so you can run multiple studies in one session,
+validates inputs with physics-aware recommendations (CFL + diffusion
+stability), and auto-opens the result image after each run.
 """
 
 import os
@@ -44,41 +44,133 @@ EXAMPLE_DEFAULTS = {
 }
 
 
+def _default_output_path(example, project_root, variant=None):
+    """Return the canonical output path for a given example run."""
+    if example == "channel" and variant:
+        return os.path.join(project_root, "output", "channel_flow", f"result_{variant}.png")
+    return os.path.join(project_root, "output", example, "result.png")
+
+
 def ask(prompt, default):
     """
     Prompt user for input, return default if empty.
 
-    Parameters
-    ----------
-    prompt : str
-        The question to display to the user.
-    default : any
-        The default value if the user provides no input.
-
-    Returns
-    -------
-    any
-        The user input cast to the type of the default value, or the default value.
+    Re-prompts (without exiting) on invalid input that can't be cast
+    to the default's type.
     """
-    val = input(f"  {prompt} [{default}]: ").strip()
-    return type(default)(val) if val else default
+    while True:
+        val = input(f"  {prompt} [{default}]: ").strip()
+        if not val:
+            return default
+        try:
+            return type(default)(val)
+        except (ValueError, TypeError):
+            print(f"    ! Invalid input. Expected a {type(default).__name__}. Try again.")
+
+
+def _recommend_dt(Nx, Ny, nu, Lx, Ly, example, lid_speed=1.0):
+    """
+    Recommend a safe dt from CFL (advection) + diffusion stability.
+
+    For explicit diffusion (Couette periodic): dt <= 0.25 * dx^2 / nu.
+    For Crank-Nicolson (cavity, channel, Taylor-Green): diffusion-stable,
+    only CFL on advection matters: dt <= dx / |u|.
+    
+    Note: The solver assumes peak speed reaches 3x lid_speed due to
+    recirculation, so the effective CFL limit is dt <= 0.5 * dx / (3 * lid_speed).
+    """
+    dx = Lx / Nx
+    dy = Ly / Ny
+    if example == "couette":
+        # Explicit diffusion — keep dt below the stability limit.
+        dt_diff = 0.25 * min(dx, dy) ** 2 / max(nu, 1e-12)
+        return round(0.5 * dt_diff, 6)
+    # Crank-Nicolson: CFL on advection. Solver assumes 3x peak speed.
+    dt_cfl = 0.5 * min(dx, dy) / max(3.0 * abs(lid_speed), 1e-12)
+    return round(dt_cfl, 6)
+
+
+def _validate_params(params, example):
+    """
+    Check physical/numerical sanity. If issues found, print recommendations
+    and ask whether to apply them. Returns (params, ok_to_run).
+
+    Rules:
+      - dt must be positive and finite
+      - nu must be positive
+      - dt stability (per scheme)
+      - Reasonable Re / time range
+    """
+    warnings = []
+    Nx, Ny = params["Nx"], params["Ny"]
+    nu = params["nu"]
+    dt = params["dt"]
+    Lx, Ly = params["Lx"], params["Ly"]
+    sim_time = params["simulation_time"]
+    lid_speed = params.get("lid_speed", 1.0)
+
+    if Nx < 8 or Ny < 8:
+        warnings.append(f"Grid {Nx}x{Ny} is very coarse. Use >=16 in each direction.")
+    if nu <= 0:
+        warnings.append(f"Viscosity must be > 0 (got {nu}).")
+    if dt <= 0:
+        warnings.append(f"Time step must be > 0 (got {dt}).")
+    if sim_time <= 0:
+        warnings.append(f"Simulation time must be > 0 (got {sim_time}).")
+
+    dx = Lx / Nx
+    dy = Ly / Ny
+    if example == "couette":
+        # Explicit diffusion stability.
+        dt_max = 0.25 * min(dx, dy) ** 2 / max(nu, 1e-12)
+        if dt > dt_max:
+            warnings.append(
+                f"dt={dt} exceeds explicit-diffusion stability limit {dt_max:.6f} "
+                f"(0.25*min(dx,dy)^2/nu). Recommended dt={_recommend_dt(Nx, Ny, nu, Lx, Ly, example):.6f}."
+            )
+    else:
+        # Crank-Nicolson: CFL on advection. Solver assumes 3x peak speed.
+        dt_cfl = 0.5 * min(dx, dy) / max(3.0 * abs(lid_speed), 1e-12)
+        if dt > dt_cfl:
+            warnings.append(
+                f"dt={dt} exceeds CFL limit {dt_cfl:.6f} (0.5*min(dx,dy)/(3*|u|)). "
+                f"Recommended dt={_recommend_dt(Nx, Ny, nu, Lx, Ly, example, lid_speed):.6f}."
+            )
+
+    Re = abs(lid_speed) * 1.0 / max(nu, 1e-12)
+    if Re > 1e5:
+        warnings.append(
+            f"Reynolds number Re={Re:.0f} is very high. Solver may be unstable; "
+            f"consider reducing lid_speed or raising nu."
+        )
+    if sim_time > 1000:
+        warnings.append(
+            f"Simulation time {sim_time}s is very long. "
+            f"For cavity, 20-50s usually reaches steady state at Re<1000."
+        )
+
+    if not warnings:
+        return params, True
+
+    print()
+    print("  ⚠ Parameter issues found:")
+    for w in warnings:
+        print(f"    - {w}")
+
+    # Offer recommendations if dt was the issue.
+    rec_dt = _recommend_dt(Nx, Ny, nu, Lx, Ly, example, lid_speed)
+    if dt > 0 and abs(rec_dt - dt) / max(dt, 1e-12) > 0.1:
+        choice = input(f"  Use recommended dt={rec_dt}? [Y/n]: ").strip().lower()
+        if choice != "n":
+            params["dt"] = rec_dt
+            print(f"    -> dt set to {rec_dt}")
+
+    ans = input("  Continue with these parameters anyway? [Y/n]: ").strip().lower()
+    return params, ans != "n"
 
 
 def _make_config(example, params):
-    """Build a config dict for the given example from user parameters.
-
-    Parameters
-    ----------
-    example : str
-        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
-    params : dict
-        User-specified parameters (Nx, Ny, nu, dt, simulation_time, etc.).
-
-    Returns
-    -------
-    dict
-        A config dict suitable for writing to YAML.
-    """
+    """Build a config dict for the given example from user parameters."""
     geo = {
         "Nx": params["Nx"],
         "Ny": params["Ny"],
@@ -95,10 +187,12 @@ def _make_config(example, params):
 
     if example == "cavity":
         cfg["boundary"] = {
-            "top": {"u": params["lid_speed"], "v": 0.0},
-            "other": {"u": 0.0, "v": 0.0},
+            "smooth_lid": params.get("smooth_lid", True),
+            "top": {"type": "wall", "u": params["lid_speed"], "v": 0.0},
+            "bottom": {"type": "wall", "u": 0.0, "v": 0.0},
+            "left": {"type": "wall", "u": 0.0, "v": 0.0},
+            "right": {"type": "wall", "u": 0.0, "v": 0.0},
         }
-        cfg["smooth_lid"] = params.get("smooth_lid", True)
     elif example == "couette":
         cfg["boundary"] = {
             "top": {"type": "wall", "u": 1.0, "v": 0.0},
@@ -135,18 +229,7 @@ def _make_config(example, params):
 
 
 def _prompt_params(example):
-    """Prompt user for parameters for a given example.
-
-    Parameters
-    ----------
-    example : str
-        Example name.
-
-    Returns
-    -------
-    dict
-        User-specified parameters.
-    """
+    """Prompt user for parameters for a given example."""
     defaults = EXAMPLE_DEFAULTS[example]
     params = {}
 
@@ -172,33 +255,70 @@ def _prompt_params(example):
     return params
 
 
-def run_example(example):
-    """Run a bundled example from the examples/ directory.
+def _resolve_output_path(example, args, project_root, variant=None):
+    """Determine output path from CLI args or default location."""
+    if "--output" in args:
+        i = args.index("--output")
+        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant)
+    if "-o" in args:
+        i = args.index("-o")
+        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant)
+    return _default_output_path(example, project_root, variant)
 
-    Parameters
-    ----------
-    example : str
-        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
+
+def _spawn_example(example, project_root, extra_args=None):
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    script_path = os.path.join(script_dir, EXAMPLE_SCRIPTS[example])
-    print(f"  Running {example.replace('_', ' ').title()} (defaults)...")
+    Run an example script as a subprocess and return its output path.
+
+    The output path is computed from the canonical default, so the caller
+    can open the result image after the subprocess returns.
+    """
+    extra_args = list(extra_args or [])
+    script_path = os.path.join(project_root, EXAMPLE_SCRIPTS[example])
+
+    # Determine variant for channel flows.
+    variant = None
+    if example == "channel":
+        for i, a in enumerate(extra_args):
+            if a == "--variant" and i + 1 < len(extra_args):
+                variant = extra_args[i + 1]
+                break
+        if variant is None:
+            variant = "inlet"
+
+    out_path = _resolve_output_path(example, extra_args, project_root, variant)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+
+    # Always pass --output so we know exactly where the result lands.
+    cmd = [sys.executable, script_path] + extra_args
+    if "--output" not in extra_args and "-o" not in extra_args:
+        cmd += ["--output", out_path]
+
+    print(f"  Running {example.replace('_', ' ').title()}...")
     print()
-    subprocess.run([sys.executable, script_path], check=False)
+    subprocess.run(cmd, check=False)
+    return out_path
 
 
-def run_custom_example(example):
-    """Prompt for parameters, write temp config, and run the example.
+def run_example(example, project_root):
+    """Run a bundled example with its default parameters."""
+    return _spawn_example(example, project_root, [])
 
-    Parameters
-    ----------
-    example : str
-        Example name: 'cavity', 'couette', 'taylor_green', 'channel'.
-    """
-    params = _prompt_params(example)
+
+def run_custom_example(example, project_root):
+    """Prompt for parameters, validate, write temp config, run example."""
+    while True:
+        params = _prompt_params(example)
+        params, ok = _validate_params(params, example)
+        if ok:
+            break
+        retry = input("  Re-enter parameters? [Y/n]: ").strip().lower()
+        if retry == "n":
+            print("  Aborted.")
+            return None
+
     cfg = _make_config(example, params)
 
-    # Write temp config
     suffix = f"_{example}_custom.yaml"
     fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="cfd_")
     try:
@@ -206,123 +326,48 @@ def run_custom_example(example):
             yaml.dump(cfg, f, default_flow_style=False)
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(script_dir, EXAMPLE_SCRIPTS[example])
-
-        print()
-        label = example.replace("_", " ").title()
-        print(f"  Running {label}...")
-        print()
-        subprocess.run([sys.executable, script_path, "--config", tmp_path], check=False)
+        # We bypass _spawn_example here because we need to pass the temp config;
+        # but we still compute the output path the same way.
+        extra_args = ["--config", tmp_path]
+        if example == "channel":
+            extra_args += ["--variant", params.get("variant", "inlet")]
+        return _spawn_example(example, script_dir, extra_args)
     finally:
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-
-def run_custom():
-    """Run the interactive custom setup (cavity with user-specified parameters)."""
-    print("Press Enter to accept defaults shown in [brackets].")
-    print()
-
-    Nx = ask("Grid cells in x", 32)
-    Ny = ask("Grid cells in y", 32)
-    nu = ask("Viscosity (nu)", 0.01)
-    dt = ask("Time step (dt)", 0.001)
-    top_u = ask("Lid speed", 1.0)
-    smooth_lid = input("  Use smooth lid profile? (y/n) [y]: ").strip().lower() != "n"
-
-    Re = abs(top_u) * 1.0 / max(nu, 1e-10)
-    t_conv = 1.0 / max(abs(top_u), 1e-10)
-    default_time = t_conv * min(max(10.0, 0.1 * Re), 200.0)
-    simulation_time = ask("Simulation time (seconds)", round(default_time, 1))
-
-    print()
-    print(f"  Grid: {Nx}x{Ny}  |  nu={nu}  |  dt={dt}  |  time={simulation_time}s  |  lid={top_u}  |  smooth={smooth_lid}")
-    print()
-
-    print("  Running solver...")
-    print()
-
-    try:
-        from cfd_solver.solver import Solver
-        from cfd_solver.solver.viz import save_contour
-    except ModuleNotFoundError as exc:
-        handle_error(exc)
-
-    try:
-        s = Solver(
-            grid_size=(Nx, Ny), nu=nu, dt=dt,
-            lid_speed=top_u, smooth_lid=smooth_lid,
-        )
-        ok = s.solve(simulation_time=simulation_time, verbose=True)
-    except Exception as exc:
-        handle_error(exc)
-
-    if not ok:
-        print()
-        print("  Simulation aborted due to blowup; not saving NaN output.")
-        print("  Reduce dt (or lid speed), then try again.")
-        raise SystemExit(1)
-
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(project_root, "output")
-    os.makedirs(output_dir, exist_ok=True)
-
-    out_path = os.path.join(output_dir, "result.png")
-    save_contour(s.mesh, s.u, s.v, s.p, out_path)
-
-    print()
-    print(f"  Result saved to {out_path}")
-
-    _open_image(out_path)
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def _open_image(out_path):
-    """Attempt to open an image file with the system viewer."""
-    opened = False
-    if sys.platform == "darwin":
-        subprocess.run(["open", out_path], check=False)
-        opened = True
-    elif sys.platform.startswith("linux"):
-        for cmd in [["xdg-open", out_path],
-                    ["explorer.exe", os.path.abspath(out_path)]]:
-            try:
-                subprocess.run(cmd, check=False)
-                opened = True
-                break
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                continue
-    elif sys.platform == "win32":
-        try:
+    """Open an image file with the system viewer (best-effort)."""
+    if not out_path or not os.path.exists(out_path):
+        print(f"  (Image not found at {out_path})")
+        return
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", out_path])
+        elif sys.platform.startswith("linux"):
+            for cmd in ("xdg-open", "explorer.exe"):
+                try:
+                    subprocess.Popen([cmd, os.path.abspath(out_path)])
+                    return
+                except FileNotFoundError:
+                    continue
+        elif sys.platform == "win32":
             os.startfile(out_path)
-            opened = True
-        except OSError:
-            pass
-
-    if not opened:
-        print(f"  Open output/result.png to view the result.")
-
-
-def main():
-    """Main entry point for the interactive CFD solver."""
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-        from cfd_solver.version_check import check_for_updates
-        check_for_updates(repo_dir=os.path.dirname(__file__) or ".")
+            return
+        print(f"  Open {out_path} to view the result.")
     except Exception:
-        pass
+        print(f"  Open {out_path} to view the result.")
 
-    try:
-        from cfd_solver import __version__
-        version_str = __version__
-    except Exception:
-        version_str = "unknown"
 
+def _print_menu():
     print()
     print("========================================")
     print("  CFD Solver — Interactive Setup")
     print("========================================")
-    print(f"  Version: {version_str}")
-    print()
     print("  Select an example to run:")
     print()
     print("    1) Cavity (defaults)        — lid-driven benchmark")
@@ -338,20 +383,62 @@ def main():
     print("    0) Quit")
     print()
 
-    choice = input("  Choice [1]: ").strip() or "1"
 
+def _run_choice(choice, project_root):
+    """Dispatch one menu choice. Returns True if user wants to continue, False to quit."""
     simple = {"1": "cavity", "2": "couette", "3": "taylor_green", "4": "channel"}
     custom = {"5": "cavity", "6": "couette", "7": "taylor_green", "8": "channel"}
 
     if choice == "0":
-        return
+        return False
     elif choice in simple:
-        run_example(simple[choice])
+        out_path = run_example(simple[choice], project_root)
+        if out_path:
+            print(f"\n  Result saved to {out_path}")
+            _open_image(out_path)
     elif choice in custom:
-        run_custom_example(custom[choice])
+        out_path = run_custom_example(custom[choice], project_root)
+        if out_path:
+            print(f"\n  Result saved to {out_path}")
+            _open_image(out_path)
     else:
-        print(f"  Unknown choice: {choice}")
-        raise SystemExit(1)
+        print(f"  Unknown choice: {choice!r}. Try again.")
+    return True
+
+
+def main():
+    """Main entry point — loops until user quits."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+        from cfd_solver.version_check import check_for_updates
+        check_for_updates(repo_dir=os.path.dirname(__file__) or ".")
+    except Exception:
+        pass
+
+    try:
+        from cfd_solver import __version__
+        version_str = __version__
+    except Exception:
+        version_str = "unknown"
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    print()
+    print("========================================")
+    print(f"  CFD Solver — Interactive Setup  (v{version_str})")
+    print("========================================")
+    print("  Run studies back-to-back. Press Ctrl+C to exit at any prompt.")
+
+    try:
+        while True:
+            _print_menu()
+            choice = input("  Choice [1]: ").strip() or "1"
+            if not _run_choice(choice, project_root):
+                break
+            # Pause before redrawing menu so users can see the result.
+            input("\n  Press Enter to return to the menu...")
+    except KeyboardInterrupt:
+        print("\n  Interrupted. Bye.")
 
 
 if __name__ == "__main__":
