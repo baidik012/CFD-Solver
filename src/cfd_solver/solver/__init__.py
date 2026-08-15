@@ -18,13 +18,19 @@ from .p0_fixes import (  # noqa: E402
     GeneralPeriodicPressureSolver,
     create_pressure_solver_p0,
 )
-Solver = P0Solver
+
+# Apply the P1 lifecycle/restart correctness layer on top of P0.
+from .p1_fixes import P1Solver  # noqa: E402
+
+Solver = P1Solver
 create_pressure_solver = create_pressure_solver_p0
 
 __all__ = [
     "Mesh",
     "BoundaryConditions",
     "Solver",
+    "P0Solver",
+    "P1Solver",
     "advection",
     "CrankNicolson",
     "FFTCrankNicolson",
