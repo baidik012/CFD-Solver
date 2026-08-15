@@ -36,14 +36,17 @@ def test_asymmetric_periodic_boundary_is_rejected():
         create_pressure_solver(mesh, bc)
 
 
-def test_cn_rejects_inlet_outlet_until_mixed_operator_exists():
+def test_cn_inlet_outlet_remains_supported_by_wall_ghost_coefficients():
+    """CN remains available for inlet/outlet BCs with the audited wall hooks."""
     bc = BoundaryConditions(
         left=InletWall(), right=OutletWall(),
         bottom=NoSlipWall(), top=NoSlipWall(),
     )
-    with pytest.raises(ValueError, match="Crank-Nicolson.*InletWall/OutletWall"):
-        Solver(grid_size=(16, 8), nu=0.01, dt=1.0e-4,
-               boundary_config=bc, diffusion_scheme="crank_nicolson")
+    solver = Solver(
+        grid_size=(16, 8), nu=0.01, dt=1.0e-4,
+        boundary_config=bc, diffusion_scheme="crank_nicolson", force=True,
+    )
+    assert solver._diffusion is not None
 
 
 def test_periodic_face_advection_is_evolved_on_both_axes():
