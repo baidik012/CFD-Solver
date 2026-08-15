@@ -10,21 +10,29 @@ from .validate import validate_config
 from . import diagnostics
 from .viz import save_quiver, save_contour, save_streamlines
 
-# Apply the isolated v0.3.2 P0 numerical-correctness layer.  It patches the
-# submodule symbol too, so direct and package-level Solver imports receive the
-# same fixed implementation.
+# Apply the isolated v0.3.2 P0 numerical-correctness layer.
 from .p0_fixes import (  # noqa: E402
     P0Solver,
     GeneralPeriodicPressureSolver,
     create_pressure_solver_p0,
 )
-Solver = P0Solver
-create_pressure_solver = create_pressure_solver_p0
+
+# Apply the P1 lifecycle/restart and compatibility layer on top of P0.
+from .p1_fixes import (  # noqa: E402
+    P1Solver,
+    LegacyPeriodicPressureSolver,
+    create_pressure_solver_p1,
+)
+
+Solver = P1Solver
+create_pressure_solver = create_pressure_solver_p1
 
 __all__ = [
     "Mesh",
     "BoundaryConditions",
     "Solver",
+    "P0Solver",
+    "P1Solver",
     "advection",
     "CrankNicolson",
     "FFTCrankNicolson",
@@ -33,6 +41,7 @@ __all__ = [
     "PressureSolver",
     "FFTPressureSolver",
     "GeneralPeriodicPressureSolver",
+    "LegacyPeriodicPressureSolver",
     "create_pressure_solver",
     "validate_config",
     "diagnostics",
