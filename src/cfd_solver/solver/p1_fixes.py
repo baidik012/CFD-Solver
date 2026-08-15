@@ -5,7 +5,8 @@ P1 fixes:
 - apply an initial condition only once across repeated solve() calls;
 - keep the P0 periodic pressure/velocity fixes without inheriting the P0
   constructor's over-restrictive CN/Inlet/Outlet guard;
-- preserve the legacy PeriodicPressureSolver(mesh) API;
+- preserve the legacy PeriodicPressureSolver(mesh) API while allowing the
+  generalized factory to return the same compatible class;
 - make parabolic inlet profiles use the actual domain height.
 """
 
@@ -17,40 +18,50 @@ import numpy as np
 
 from . import solver as solver_module
 from . import pressure as pressure_module
-from .bc import InletWall, OutletWall
 from .p0_fixes import (
     P0Solver,
     GeneralPeriodicPressureSolver,
     _periodic_flags,
     _wrap_periodic_advection,
+    create_pressure_solver_p0,
 )
 
 
 class LegacyPeriodicPressureSolver(GeneralPeriodicPressureSolver):
-    """Backward-compatible x-periodic pressure solver API.
+    """Backward-compatible periodic pressure solver API.
 
-    The original public class accepted only ``mesh`` and represented the
-    historical periodic-x/Neumann-y topology.  Keep that API while the P0
-    factory supports arbitrary periodic directions.
+    The legacy public class accepted only ``mesh`` and represented the
+    historical periodic-x/Neumann-y topology. The generalized class now
+    supports all periodic topologies, so this compatibility class accepts
+    optional topology flags while retaining the old one-argument form.
     """
 
-    def __init__(self, mesh):
-        super().__init__(mesh, periodic_x=True, periodic_y=False)
+    def __init__(self, mesh, periodic_x=True, periodic_y=False):
+        super().__init__(mesh, periodic_x=periodic_x, periodic_y=periodic_y)
 
 
-# Preserve the old direct-import API without weakening the generalized
-# pressure factory used by the P0 solver.
+def create_pressure_solver_p1(mesh, bc=None):
+    """P0 pressure factory with legacy-class compatibility."""
+    if bc is not None:
+        px, py = _periodic_flags(bc)
+        if px or py:
+            if bc.has_outlet():
+                raise ValueError(
+                    "OutletWall cannot be combined with periodic pressure topology"
+                )
+            return LegacyPeriodicPressureSolver(mesh, px, py)
+    return create_pressure_solver_p0(mesh, bc)
+
+
+# Keep both direct pressure-module imports and Solver construction on the
+# compatibility-aware factory/class.
 pressure_module.PeriodicPressureSolver = LegacyPeriodicPressureSolver
+pressure_module.create_pressure_solver = create_pressure_solver_p1
+solver_module.create_pressure_solver = create_pressure_solver_p1
 
 
 def _p1_inlet_profile(self, wall, Ny, axis="x"):
-    """Return an inlet profile using the physical domain height.
-
-    In a channel inlet, the parabolic coordinate is transverse to the inlet,
-    i.e. y regardless of whether the inlet is on the left/right or top/bottom.
-    The staggered u/v boundary values supplied to this helper are located at
-    cell centers, hence y=(j+1/2)dy for Ny cells.
-    """
+    """Return an inlet profile using the physical domain height."""
     if wall.profile == "uniform":
         return np.full(Ny, wall.U_max, dtype=float)
     if wall.profile != "parabolic":
@@ -64,9 +75,6 @@ def _p1_inlet_profile(self, wall, Ny, axis="x"):
     return 4.0 * wall.U_max * eta * (1.0 - eta)
 
 
-# Patch the existing BC helper rather than duplicating the large BC module.
-# This is intentionally a small compatibility layer and leaves the public
-# BoundaryConditions API unchanged.
 from . import bc as bc_module
 bc_module.BoundaryConditions._inlet_profile = _p1_inlet_profile
 
@@ -84,10 +92,10 @@ class P1Solver(P0Solver):
         else:
             px = py = False
 
-        # Bypass P0Solver.__init__ deliberately.  The merged P0 branch added
+        # Bypass P0Solver.__init__ deliberately. The merged P0 branch added
         # a fail-fast CN+Inlet/Outlet guard, but the existing CN operator has
-        # wall ghost-cell support and the project's regression suite explicitly
-        # exercises that supported path.  P1 must not regress that API.
+        # wall ghost-cell support and the regression suite exercises that
+        # supported path. P1 must not regress that API.
         _BaseSolver.__init__(self, *args, **kwargs)
 
         self._periodic_x = px
@@ -162,5 +170,4 @@ class P1Solver(P0Solver):
         return solver
 
 
-# Keep direct submodule imports consistent with the package-level Solver.
 solver_module.Solver = P1Solver
