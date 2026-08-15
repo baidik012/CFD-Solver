@@ -16,10 +16,12 @@ def test_couette_steady_solution_uses_domain_height():
     )
 
 
-def test_couette_transient_solution_uses_domain_height():
+def test_couette_transient_solution_scales_with_domain_height():
+    """Transient Couette similarity is governed by Fo = nu*t/H^2."""
     y = np.array([0.25, 0.5, 0.75])
     a = couette_analytical_transient(y, t=0.5, nu=0.01, H=1.0)
-    b = couette_analytical_transient(y * 2.0, t=0.5, nu=0.01, H=2.0)
+    # For H=2, t must scale by H^2 to represent the same dimensionless time.
+    b = couette_analytical_transient(y * 2.0, t=2.0, nu=0.01, H=2.0)
     np.testing.assert_allclose(a, b, rtol=1e-12, atol=1e-12)
 
 
