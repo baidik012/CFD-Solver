@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from cfd_solver.solver import BoundaryConditions, NoSlipWall, Solver
+from cfd_solver.solver import BoundaryConditions, Solver
+from cfd_solver.solver.bc import NoSlipWall
 
 
 def _make_solver(initial_condition=None):
