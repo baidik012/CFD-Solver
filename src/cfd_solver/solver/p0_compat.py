@@ -22,6 +22,8 @@ from .p0_fixes import (
     create_pressure_solver_p0,
 )
 
+_BaseSolver = solver_module.Solver
+
 
 class CompatiblePeriodicPressureSolver(GeneralPeriodicPressureSolver):
     """General periodic pressure solver with the legacy one-argument API."""
@@ -54,7 +56,7 @@ class CorrectedP0Solver(P0Solver):
 
         # Call the original Solver implementation, bypassing only the P0
         # constructor guard. All P0 step/projection fixes remain inherited.
-        solver_module.Solver.__init__(self, *args, **kwargs)
+        _BaseSolver.__init__(self, *args, **kwargs)
         self._periodic_x = px
         self._periodic_y = py
         if px or py:
