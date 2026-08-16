@@ -136,6 +136,8 @@ CFD-Solver/
 
 Full extension guide: [DEVELOPMENT.md](DEVELOPMENT.md)
 
+Example gallery: [EXAMPLES.md](EXAMPLES.md)
+
 ---
 
 ## License
