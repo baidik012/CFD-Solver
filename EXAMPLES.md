@@ -29,9 +29,21 @@ python examples/cavity/run.py
 
 Primary/secondary vortex positions match within 2%.
 
+![Ghia Re=100 validation](images/ghia_re100.png)
+
 ```bash
 python -m examples.cavity.validate
 ```
+
+### Validation: Ghia et al. Re=400 and Re=1000
+
+![Ghia Re=400 validation](images/ghia_re400.png)
+
+![Ghia Re=1000 validation](images/ghia_re1000.png)
+
+Higher Reynolds numbers show corner vortex development matching benchmark data.
+
+![Cavity Flow Convergence](images/cavity_convergence.png)
 
 ---
 
@@ -72,6 +84,8 @@ Convergence rate: ~2nd order in space.
 python -m examples.couette.validate
 python -m examples.couette.convergence
 ```
+
+![Couette Flow Convergence](images/couette_convergence.png)
 
 ---
 
@@ -116,6 +130,8 @@ Convergence ~0.9 (first-order from explicit diffusion with periodic BCs).
 python -m examples.taylor_green.validate
 python -m examples.taylor_green.convergence
 ```
+
+![Taylor-Green Convergence](images/taylor_green_convergence.png)
 
 ---
 
