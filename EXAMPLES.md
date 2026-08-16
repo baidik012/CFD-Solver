@@ -127,12 +127,31 @@ force or by inlet/outlet BCs.
 - **Config variants:** `config_body_force.yaml`, `config_inlet.yaml`
 - **Analytical:** Parabolic profile u(y) = (4*U_max/H^2) * y * (H - y)
 
+### Inlet/Outlet Variant
+
+- **Grid:** 128x32, dt=0.0005, nu=0.01
+- **BCs:** Parabolic inlet, zero-gradient outlet, no-slip walls
+- **Output:** `images/channel_inlet_result.png`
+
+![Channel Flow (Inlet/Outlet)](images/channel_inlet_result.png)
+
 ```bash
-python examples/channel_flow/run.py --variant body-force
 python examples/channel_flow/run.py --variant inlet
 ```
 
-### Validation: Parabolic Profile (t=10s, 64x64)
+### Body-Force Variant
+
+- **Grid:** 128x32, dt=0.0005, nu=0.01
+- **BCs:** Periodic left/right, no-slip walls, constant body force
+- **Output:** `images/channel_body_force_result.png`
+
+![Channel Flow (Body Force)](images/channel_body_force_result.png)
+
+```bash
+python examples/channel_flow/run.py --variant body-force
+```
+
+### Validation: Parabolic Profile (t=10s, 128x32, nu=0.01)
 
 | Variant | L2 error | L∞ error | U_max error |
 |---------|----------|----------|-------------|
@@ -145,3 +164,16 @@ Convergence: ~2nd order in space.
 python -m examples.channel_flow.validate
 python -m examples.channel_flow.convergence
 ```
+
+### Grid Convergence
+
+![Channel Flow Convergence](images/channel_convergence.png)
+
+| Grid | L2 error | Rate |
+|------|----------|------|
+| 32x16 | 1.74e-3 | — |
+| 64x32 | 4.57e-4 | 1.93 |
+| 128x32 | 4.52e-4 | 0.01 |
+| 256x64 | 1.25e-4 | 1.85 |
+
+Rate approaches 2nd order on finer grids; the 128x32 plateau is due to time integration error dominating.
