@@ -1,83 +1,53 @@
-"""Reusable validation helpers for CFD examples and tests.
-
-Provides:
-  - extract_profile: extract a velocity profile at a given position
-  - compute_l2_error, compute_linf_error: error norms
-  - print_error_report: formatted output
-  - run_grid_convergence: run simulation on multiple grids
-  - compute_convergence_rate: fit convergence rate from grid study
-  - print_convergence_table: formatted convergence table
-  - save_convergence_plot: log-log convergence plot as PNG
-"""
+"""Reusable validation helpers for CFD examples and tests."""
 
 import numpy as np
 
 
 def extract_profile(solver, direction="u", axis="y", position=None):
-    """Extract a velocity profile from the solver at a given position.
-
-    Parameters
-    ----------
-    solver : Solver
-        A solved (or partially solved) Solver instance.
-    direction : str
-        Velocity component: 'u' (horizontal) or 'v' (vertical).
-    axis : str
-        Profile direction: 'y' (vertical slice at given x) or
-        'x' (horizontal slice at given y).
-    position : float or None
-        Physical coordinate along the slicing axis.
-        None defaults to domain center.
-
-    Returns
-    -------
-    coord : ndarray
-        Physical coordinates along the profile axis.
-    values : ndarray
-        Interpolated velocity values.
-    """
+    """Extract a velocity profile from the solver at a given position."""
     mesh = solver.mesh
 
     if direction == "u":
-        field = solver.u[:, 1:-1]  # strip ghost cells in y
+        field = solver.u[:, 1:-1]
         if axis == "y":
-            # Vertical profile at given x (u-face coordinates)
-            if position is None:
-                i = mesh.Nx // 2
-            else:
-                i = int(round(position / mesh.dx))
-                i = max(0, min(i, mesh.Nx))
+            i = mesh.Nx // 2 if position is None else int(round(position / mesh.dx))
+            i = max(0, min(i, mesh.Nx))
             coord = (np.arange(mesh.Ny) + 0.5) * mesh.dy
             values = field[i, :]
-        else:
-            # Horizontal profile at given y (u-face coordinates)
+        elif axis == "x":
             if position is None:
                 j = mesh.Ny // 2
             else:
-                j = int(round(position / mesh.dy))
+                # u is located at y=(j+1/2)dy.
+                j = int(round(position / mesh.dy - 0.5))
                 j = max(0, min(j, mesh.Ny - 1))
-            coord = mesh.xf  # u-face x-coordinates
+            coord = mesh.xf
             values = field[:, j]
+        else:
+            raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
     elif direction == "v":
-        field = solver.v[1:-1, :]  # strip ghost cells in x
+        field = solver.v[1:-1, :]
         if axis == "x":
-            # Horizontal profile at given y (v-face coordinates)
             if position is None:
                 j = mesh.Ny // 2
             else:
+                # v is located at x=(i+1/2)dx; for a horizontal profile,
+                # position is y and therefore selects an integer y-face.
                 j = int(round(position / mesh.dy))
                 j = max(0, min(j, mesh.Ny))
             coord = (np.arange(mesh.Nx) + 0.5) * mesh.dx
             values = field[:, j]
-        else:
-            # Vertical profile at given x (v-face coordinates)
+        elif axis == "y":
             if position is None:
                 i = mesh.Nx // 2
             else:
-                i = int(round(position / mesh.dx))
+                # v is located at x=(i+1/2)dx.
+                i = int(round(position / mesh.dx - 0.5))
                 i = max(0, min(i, mesh.Nx - 1))
-            coord = mesh.yv  # v-face y-coordinates
+            coord = mesh.yv
             values = field[i, :]
+        else:
+            raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
     else:
         raise ValueError(f"direction must be 'u' or 'v', got {direction!r}")
 
@@ -95,21 +65,7 @@ def compute_linf_error(numerical, analytical):
 
 
 def print_error_report(name, l2, linf, divergence=None, grid=None, extra=None):
-    """Print a formatted error report.
-
-    Parameters
-    ----------
-    name : str
-        Test case name.
-    l2, linf : float
-        L2 and L-infinity errors.
-    divergence : float, optional
-        Maximum divergence of the velocity field.
-    grid : str, optional
-        Grid description (e.g. '128x32').
-    extra : dict, optional
-        Additional key-value pairs to print.
-    """
+    """Print a formatted error report."""
     print(f"--- {name} ---")
     if grid:
         print(f"  Grid: {grid}")
@@ -123,76 +79,39 @@ def print_error_report(name, l2, linf, divergence=None, grid=None, extra=None):
 
 
 def run_grid_convergence(run_fn, grids, compute_error_fn):
-    """Run simulation on multiple grids and collect L2 errors.
-
-    Parameters
-    ----------
-    run_fn : callable
-        Function(nx, ny) -> solver instance (already solved).
-    grids : list of (Nx, Ny) tuples
-        Grid sizes to test, from coarsest to finest.
-    compute_error_fn : callable
-        Function(solver) -> float (L2 error).
-
-    Returns
-    -------
-    errors : list of float
-        L2 error for each grid.
-    """
+    """Run simulations on multiple grids and collect errors."""
     errors = []
     for nx, ny in grids:
         solver = run_fn(nx, ny)
-        err = compute_error_fn(solver)
-        errors.append(err)
+        errors.append(compute_error_fn(solver))
     return errors
 
 
 def compute_convergence_rate(errors, grids):
-    """Compute convergence rates from grid refinement study.
+    """Compute observed rates from successive grid refinements."""
+    if len(errors) != len(grids):
+        raise ValueError("errors and grids must have the same length")
 
-    For each adjacent pair of grids, computes:
-        rate = log2(errors[i] / errors[i+1])
-
-    This assumes uniform refinement (grid size doubles each step).
-
-    Parameters
-    ----------
-    errors : list of float
-        L2 errors from coarsest to finest.
-    grids : list of (Nx, Ny) tuples
-        Corresponding grid sizes.
-
-    Returns
-    -------
-    rates : list of float
-        Convergence rates (len = len(errors) - 1).
-        None entries indicate undefined rates (e.g., zero error).
-    """
     rates = []
     for i in range(len(errors) - 1):
         e_coarse = errors[i]
         e_fine = errors[i + 1]
-        if e_fine > 0 and e_coarse > 0:
-            # Grid size ratio (assuming Nx doubles)
-            ratio = grids[i + 1][0] / grids[i][0]
-            rate = np.log2(e_coarse / e_fine) / np.log2(ratio)
-            rates.append(rate)
-        else:
+        nx_ratio = grids[i + 1][0] / grids[i][0]
+        ny_ratio = grids[i + 1][1] / grids[i][1]
+        ratios = [r for r in (nx_ratio, ny_ratio) if r > 1.0]
+        if e_fine <= 0 or e_coarse <= 0 or not ratios:
             rates.append(None)
+            continue
+        if len(ratios) == 2 and not np.isclose(ratios[0], ratios[1]):
+            rates.append(None)
+            continue
+        refinement = ratios[0]
+        rates.append(np.log(e_coarse / e_fine) / np.log(refinement))
     return rates
 
 
 def print_convergence_table(grids, errors, rates, name=""):
-    """Print a formatted convergence table.
-
-    Parameters
-    ----------
-    grids : list of (Nx, Ny) tuples
-    errors : list of float
-    rates : list of float or None
-    name : str, optional
-        Table title.
-    """
+    """Print a formatted convergence table."""
     if name:
         print(f"\n--- {name} ---")
     print(f"| {'Grid':>8} | {'L2 error':>12} | {'Rate':>8} |")
@@ -207,18 +126,7 @@ def print_convergence_table(grids, errors, rates, name=""):
 
 
 def save_convergence_plot(grids, errors, rates, output_path, name=""):
-    """Save a log-log convergence plot as PNG.
-
-    Parameters
-    ----------
-    grids : list of (Nx, Ny) tuples
-    errors : list of float
-    rates : list of float or None
-    output_path : str
-        Path to save the PNG file.
-    name : str, optional
-        Plot title.
-    """
+    """Save a log-log convergence plot as PNG."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -236,7 +144,6 @@ def save_convergence_plot(grids, errors, rates, output_path, name=""):
     ax.loglog(plot_sizes, plot_errors, "bo-", linewidth=2, markersize=8,
               label="L2 error")
 
-    # Add slope annotations
     if rates:
         for i, rate in enumerate(rates):
             if rate is not None:
@@ -246,7 +153,6 @@ def save_convergence_plot(grids, errors, rates, output_path, name=""):
                            textcoords="offset points", xytext=(10, 10),
                            fontsize=9, color="blue")
 
-    # Reference 2nd-order line
     if len(plot_sizes) >= 2:
         ref_line = [plot_errors[0] * (plot_sizes[0] / s) ** 2
                     for s in plot_sizes]
