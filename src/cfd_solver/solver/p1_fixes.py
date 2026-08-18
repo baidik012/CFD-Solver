@@ -112,20 +112,9 @@ class P1Solver(P0Solver):
 
     def __init__(self, *args, **kwargs):
         boundary_config = kwargs.get("boundary_config")
-        diffusion_scheme = kwargs.get("diffusion_scheme", "crank_nicolson")
 
         if boundary_config is not None:
             px, py = _periodic_flags(boundary_config)
-            if diffusion_scheme == "crank_nicolson":
-                if any(
-                    isinstance(w, (InletWall, OutletWall))
-                    for w in boundary_config.walls.values()
-                ):
-                    raise ValueError(
-                        "Crank-Nicolson is not currently valid for InletWall/OutletWall "
-                        "normal-velocity boundaries. Use diffusion_scheme='explicit' "
-                        "until the mixed-BC implicit operator is implemented."
-                    )
         else:
             px = py = False
 
