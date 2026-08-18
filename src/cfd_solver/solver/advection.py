@@ -1,55 +1,18 @@
 """Advection schemes for staggered incompressible flow with ghost cells.
 
-This module provides functions to calculate the advective term (u·∇)u in the
-Navier-Stokes equations. Due to the staggered Arakawa C-grid, velocity
-components (u, v) are not co-located, requiring interpolation to evaluate
-the advection at the correct face locations.
-
-Advection Term:
----------------
-For the u-momentum equation, the advection term is: u * ∂u/∂x + v * ∂u/∂y
-For the v-momentum equation, the advection term is: u * ∂v/∂x + v * ∂v/∂y
+Due to the staggered Arakawa C-grid, velocity components are not co-located,
+requiring interpolation to evaluate advection at the correct face locations.
 
 Schemes:
---------
-1. Upwind: First-order accurate. It uses the direction of the flow to select the
-   derivative approximation, providing high numerical stability (it avoids
-   oscillations) at the cost of being "diffusive" (it tends to smooth out
-   sharp gradients).
-2. Central: Second-order accurate. It uses a symmetric average for derivatives,
-   providing higher accuracy but can be unstable and prone to oscillations
-   (wiggles) at high Reynolds numbers (high cell Peclet numbers).
+- upwind: first-order, stable, diffusive
+- central: second-order, less diffusive, may oscillate at high Re
 """
 
 import numpy as np
 
 
 def upwind(u, v, dx, dy):
-    """First-order upwind advection on a staggered grid with ghost cells.
-
-    The upwind scheme determines the derivative of a quantity based on the
-    direction of the velocity (the "wind").
-
-    Parameters
-    ----------
-    u : ndarray, shape (Nx+1, Ny+2)
-        u-velocity array including ghost cells in y.
-    v : ndarray, shape (Nx+2, Ny+1)
-        v-velocity array including ghost cells in x.
-    dx : float
-        Grid spacing in x.
-    dy : float
-        Grid spacing in y.
-
-    Returns
-    -------
-    adv_u : ndarray, shape (Nx+1, Ny+2)
-        The advective contribution for the u-momentum equation.
-        Non-zero only at interior physical faces.
-    adv_v : ndarray, shape (Nx+2, Ny+1)
-        The advective contribution for the v-momentum equation.
-        Non-zero only at interior physical faces.
-    """
+    """First-order upwind advection on a staggered grid with ghost cells."""
     Nx = u.shape[0] - 1
     Ny = u.shape[1] - 2  # u has shape (Nx+1, Ny+2)
 
@@ -120,22 +83,7 @@ def upwind(u, v, dx, dy):
 
 
 def central(u, v, dx, dy):
-    """Second-order central difference advection on a staggered grid.
-
-    The central scheme uses a symmetric average to compute derivatives.
-
-    Parameters
-    ----------
-    u : ndarray, shape (Nx+1, Ny+2)
-    v : ndarray, shape (Nx+2, Ny+1)
-    dx : float
-    dy : float
-
-    Returns
-    -------
-    adv_u : ndarray, shape (Nx+1, Ny+2)
-    adv_v : ndarray, shape (Nx+2, Ny+1)
-    """
+    """Second-order central difference advection on a staggered grid."""
     Nx = u.shape[0] - 1
     Ny = u.shape[1] - 2
 

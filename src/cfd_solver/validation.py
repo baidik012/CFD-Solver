@@ -259,9 +259,6 @@ def save_convergence_plot(grids, errors, rates, output_path, name=""):
     ax.grid(True, alpha=0.3, which="both")
 
     fig.tight_layout()
-    # (Audit fix #10 — removed bbox_inches='tight' for consistency with
-    #  viz.py which uses tight_layout() only; mixing both can cause
-    #  double-compaction and cut-off labels.)
     fig.savefig(output_path, dpi=150)
     print(f"Convergence plot saved to: {output_path}")
     plt.close(fig)

@@ -23,8 +23,6 @@ from cfd_solver.utils import handle_error
 
 
 # Wall-type lookup derived from the single source of truth in bc.py.
-# (Audit finding P0-1 / P0-3 — previously this was a hand-maintained
-# duplicate of the same mapping.)
 _WALL_TYPE_MAP = WALL_TYPE_REGISTRY
 
 
@@ -152,7 +150,7 @@ def run(args):
             raise SystemExit(1)
 
         # load_config() runs validate_config() and exits with clear
-        # error messages on schema failure. (Audit finding P1-5.)
+        # error messages on schema failure.
         cfg = load_config(args.config)
 
         # Extract parameters from config
@@ -270,15 +268,15 @@ def run_example(args):
 def main():
     """
     Main entry point for the CLI.
-    
+
     Parses arguments, checks for updates, and dispatches to the appropriate command.
     """
     from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
 
     # Pre-scan argv for --no-update-check so we can skip the network call
-    # before constructing the full argparse parser.  (Audit finding P2-14.)
-    # The env var CFD_SOLVER_NO_UPDATE_CHECK=1 has the same effect.
+    # before constructing the full argparse parser. The env var
+    # CFD_SOLVER_NO_UPDATE_CHECK=1 has the same effect.
     if "--no-update-check" in sys.argv:
         os.environ["CFD_SOLVER_NO_UPDATE_CHECK"] = "1"
     check_for_updates()

@@ -1,5 +1,4 @@
-"""
-Lightweight version check against the remote repository.
+"""Lightweight version check against the remote repository.
 
 Compares the local git HEAD commit of THIS package's repository to the
 latest commit on origin/main. Prints a one-line notice if the local copy
@@ -9,19 +8,16 @@ Designed to be called once at CLI startup. All failures are swallowed so
 a missing git binary or network error never breaks the solver. Set the
 environment variable CFD_SOLVER_NO_UPDATE_CHECK=1 to disable entirely.
 
-Caching (audit finding P2-14):
-    The check is cached on disk for 24 hours so that repeated CLI
-    invocations do not each pay the network latency of
-    ``git fetch origin``.  The cache file lives at
-    ``~/.cache/cfd-solver/last_check`` (XDG-compatible) and stores the
-    last check timestamp.  Pass ``force=True`` to bypass the cache.
+Caching: The check is cached on disk for 24 hours so that repeated CLI
+invocations do not each pay the network latency of ``git fetch origin``.
+The cache file lives at ``~/.cache/cfd-solver/last_check`` (XDG-compatible)
+and stores the last check timestamp. Pass ``force=True`` to bypass the cache.
 """
 
 import os
 import subprocess
 import sys
 import time
-
 
 # How long (in seconds) between update checks.  24 hours.
 _CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -60,8 +56,7 @@ def _touch_cache():
 
 
 def _run(cmd, cwd=None, timeout=3):
-    """
-    Run a subprocess and return its stdout.
+    """Run a subprocess and return its stdout.
 
     Parameters
     ----------
@@ -99,17 +94,16 @@ def _package_repo_dir():
 
 
 def check_for_updates(repo_dir=None, force=False):
-    """
-    Print a notice if the local repository is behind origin/main.
+    """Print a notice if the local repository is behind origin/main.
 
     Git operations are anchored to this package's own repository (or the
     explicit repo_dir), never the caller's working directory, so running
     the CLI from inside an unrelated git repository cannot produce a
     bogus notice.
 
-    The check is cached on disk for 24 hours (see module docstring) so
-    that repeated CLI invocations do not each pay the network latency.
-    Pass ``force=True`` to bypass the cache.
+    The check is cached on disk for 24 hours so that repeated CLI
+    invocations do not each pay the network latency. Pass ``force=True``
+    to bypass the cache.
 
     Parameters
     ----------
@@ -128,8 +122,7 @@ def check_for_updates(repo_dir=None, force=False):
     if os.environ.get("CFD_SOLVER_NO_UPDATE_CHECK"):
         return False
 
-    # Cache check (audit finding P2-14).  Skip the network call if we
-    # have checked recently.
+    # Cache check. Skip the network call if we have checked recently.
     if not force and _cache_is_fresh():
         return False
 

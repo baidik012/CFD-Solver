@@ -1,7 +1,7 @@
 """P0 numerical correctness fixes for v0.3.2.
 
 This module is intentionally isolated so the critical fixes can be reviewed and
-merged independently.  It is imported by ``solver.__init__`` and replaces the
+merged independently. It is imported by ``solver.__init__`` and replaces the
 public Solver class with ``P0Solver`` while preserving the existing public API.
 
 P0 fixes implemented here:
@@ -10,12 +10,12 @@ P0 fixes implemented here:
    The old solver used a periodic-x/Neumann-y spectral operator for every
    configuration containing any PeriodicWall.
 2. Inlet/outlet normal-velocity cases are rejected when Crank-Nicolson is
-   requested.  The existing CN matrix does not consistently incorporate those
+   requested. The existing CN matrix does not consistently incorporate those
    normal-velocity boundary equations, so silently solving that problem would
-   produce a physically inconsistent predictor.  Failing fast is safer than
+   produce a physically inconsistent predictor. Failing fast is safer than
    returning a wrong solution until a dedicated mixed-BC CN operator is added.
 3. Periodic staggered velocity faces are advanced as real PDE degrees of
-   freedom.  The periodic u face in x and periodic v face in y receive the
+   freedom. The periodic u face in x and periodic v face in y receive the
    same advection, diffusion, body-force, and pressure-correction treatment as
    their duplicated physical faces.
 """
@@ -34,8 +34,8 @@ from .bc import InletWall, OutletWall, PeriodicWall
 class GeneralPeriodicPressureSolver:
     """FFT/DCT pressure solver for arbitrary periodic directions.
 
-    The pressure unknowns are cell-centered.  A periodic direction uses a DFT
-    and the standard periodic discrete Laplacian eigenvalues.  A non-periodic
+    The pressure unknowns are cell-centered. A periodic direction uses a DFT
+    and the standard periodic discrete Laplacian eigenvalues. A non-periodic
     direction uses the existing homogeneous-Neumann DCT-II operator.
     """
 
@@ -140,7 +140,7 @@ def create_pressure_solver_p0(mesh, bc=None):
 
 
 # Patch the module-level reference used by Solver.__init__ as well as the
-# public pressure factory.  This is done once at package import time.
+# public pressure factory. This is done once at package import time.
 pressure_module.PeriodicPressureSolver = GeneralPeriodicPressureSolver
 pressure_module.create_pressure_solver = create_pressure_solver_p0
 solver_module.create_pressure_solver = create_pressure_solver_p0

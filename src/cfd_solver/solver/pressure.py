@@ -1,35 +1,13 @@
 """Pressure Poisson solver for staggered incompressible flow.
 
-This module implements the pressure projection step of Chorin's method.
-After an intermediate velocity field (u*, v*) is calculated (accounting for
-advection and diffusion), it generally will not satisfy the incompressibility
-constraint (∇·u = 0).
+Solves ∇²p = (∇·u*)/dt with Neumann (∂p/∂n = 0) or periodic boundary
+conditions. The intermediate velocity is then projected onto the
+divergence-free space via u = u* − dt·∇p.
 
-Pressure Poisson Equation (PPE):
---------------------------------
-The projection step finds a pressure field 'p' such that the corrected
-velocity u = u* - dt*∇p is divergence-free. Taking the divergence of this
-equation leads to the PPE:
-    ∇²p = (∇·u*) / dt
-
-Solving this Poisson equation with Neumann boundary conditions (∂p/∂n = 0)
-allows us to project the intermediate velocity onto the space of
-divergence-free fields.
-
-Two solver backends are provided:
-
-* :class:`PressureSolver` — direct sparse solver (SuperLU via ``splu``).
-  Factorization is O(N^1.5) but each back-substitution is O(N). Best for
-  small-to-medium grids where the factorization cost is amortized.
-
-* :class:`FFTPressureSolver` — spectral solver using the Discrete Cosine
-  Transform (DCT-II). The Neumann-Laplacian eigenvectors on a uniform
-  rectangular grid are known analytically as DCT-II basis functions, so
-  the Poisson equation diagonalises in the frequency domain. Each solve
-  is O(N log N) with no factorization step. Best for large grids (≥ 128²).
-
-The factory function :func:`create_pressure_solver` picks the appropriate
-backend automatically based on grid size.
+Backends:
+- PressureSolver: direct sparse (splu); handles arbitrary BCs.
+- FFTPressureSolver: DCT-II spectral; pure Neumann only.
+- PeriodicPressureSolver: DFT (x) + DCT-II (y); periodic x + Neumann y.
 """
 
 import numpy as np
@@ -41,28 +19,12 @@ from scipy.fft import dctn, idctn
 class PressureSolver:
     """Pressure Poisson solver with Neumann boundary conditions.
 
-    The solver builds a discrete Laplacian operator (A) and uses a direct
-    sparse solver (superLU via splu) for efficiency. Since the Poisson
-    problem with pure Neumann BCs is singular (defined only up to an
-    additive constant), we pin one pressure value to zero to ensure a
-    unique solution.
+    The assembled operator A = -∇² (positive-definite form). To recover
+    the conventional ∇²p = (∇·u*)/dt, the RHS is negated before solving.
 
-    When an :class:`~cfd_solver.solver.bc.OutletWall` is present, pressure
-    is pinned to zero at the outlet column instead of at cell (0,0), and the
-    zero-mean normalisation is skipped (the outlet defines the reference).
-
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-    bc : BoundaryConditions, optional
-        Boundary conditions.  When ``None`` (default), pure Neumann BCs are
-        assumed on all walls.
-
-    Attributes
-    ----------
-    A : csc_matrix
-        The discrete Laplacian operator.
+    When an OutletWall is present, pressure is pinned to zero at the
+    outlet column instead of at cell (0,0), and the zero-mean normalisation
+    is skipped (the outlet defines the reference).
     """
 
     def __init__(self, mesh, bc=None):
@@ -72,10 +34,7 @@ class PressureSolver:
         self.dy = mesh.dy
         self.bc = bc
 
-        # Identify outlet columns to pin (if any)
         self._outlet_cols = self._find_outlet_columns()
-
-        # Build the constant Poisson matrix once during initialization
         self.A = self._build_matrix()
         self._solve = splu(self.A).solve
 
@@ -87,10 +46,10 @@ class PressureSolver:
         from .bc import OutletWall
         if isinstance(self.bc.walls.get('left'), OutletWall):
             for j in range(self.Ny):
-                cols.add(j * self.Nx)          # column i=0
+                cols.add(j * self.Nx)
         if isinstance(self.bc.walls.get('right'), OutletWall):
             for j in range(self.Ny):
-                cols.add(j * self.Nx + self.Nx - 1)  # column i=Nx-1
+                cols.add(j * self.Nx + self.Nx - 1)
         return cols
 
     def _build_matrix(self):
@@ -99,14 +58,13 @@ class PressureSolver:
         inv_dx2 = 1.0 / (self.dx**2)
         inv_dy2 = 1.0 / (self.dy**2)
 
-        # 1D Laplacian with Neumann boundaries in x
+        # 1D Neumann Laplacian: half-diagonal weight at boundaries
         diag_x = np.full(Nx, 2.0 * inv_dx2)
         diag_x[0] = inv_dx2
         diag_x[-1] = inv_dx2
         off_x = np.full(Nx - 1, -inv_dx2)
         Lx = diags([off_x, diag_x, off_x], [-1, 0, 1], shape=(Nx, Nx), format="csr")
 
-        # 1D Laplacian with Neumann boundaries in y
         diag_y = np.full(Ny, 2.0 * inv_dy2)
         diag_y[0] = inv_dy2
         diag_y[-1] = inv_dy2
@@ -116,9 +74,8 @@ class PressureSolver:
         I_Nx = eye(Nx, format="csr")
         I_Ny = eye(Ny, format="csr")
 
-        # Combine into 2D Laplacian via Kronecker product: A = Ly ⊕ Lx
+        # Kronecker-product assembly: A = Ly ⊕ Lx
         A = kron(I_Ny, Lx) + kron(Ly, I_Nx)
-
         A = A.tolil()
 
         if self._outlet_cols:
@@ -137,51 +94,34 @@ class PressureSolver:
     def solve(self, u_star, v_star, dt):
         """Solve the pressure Poisson equation.
 
-        Parameters
-        ----------
-        u_star, v_star : ndarray
-            The intermediate velocity field.
-        dt : float
-            Time step.
-
-        Returns
-        -------
-        p : ndarray, shape (Nx+2, Ny+2)
-            The calculated pressure field including ghost cells.
+        Returns the pressure field including ghost cells, shape (Nx+2, Ny+2).
         """
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.dx, self.dy
 
-        # Compute divergence of intermediate velocity over active cells
+        # Divergence of intermediate velocity over active cells
         div = (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
-        
-        # RHS of Poisson eq: ∇²p = (∇·u*) / dt.
-        # The assembled operator A has a positive diagonal / negative
-        # off-diagonals, i.e. A = -∇² (positive-definite form). Solving
-        # A·p = rhs therefore yields -∇²p = rhs. To recover ∇²p = (∇·u*)/dt
-        # we must negate the RHS, otherwise the projection ADDS divergence
-        # instead of removing it and the simulation blows up.
+
+        # A = -∇², so solving A·p = rhs yields -∇²p = rhs;
+        # we need ∇²p = (∇·u*)/dt, hence the negation.
         rhs = (-div / dt).ravel(order="F")
 
         if self._outlet_cols:
-            # Pin outlet cells to p=0
             for col in self._outlet_cols:
                 rhs[col] = 0.0
         else:
-            # Pure Neumann: pin first cell to 0
             rhs[0] = 0.0
 
         p_flat = self._solve(rhs)
 
         p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
-        # Populate interior physical cells
         p[1:-1, 1:-1] = p_flat.reshape((Nx, Ny), order="F")
 
         if not self._outlet_cols:
-            # Normalize to zero mean (only for pure-Neumann case)
+            # Zero-mean normalisation for pure-Neumann case
             p[1:-1, 1:-1] -= np.mean(p[1:-1, 1:-1])
 
-        # Enforce Neumann BCs on pressure ghost cells (zero gradient)
+        # Neumann ghost cells: zero gradient
         p[0, :] = p[1, :]
         p[-1, :] = p[-2, :]
         p[:, 0] = p[:, 1]
@@ -191,24 +131,10 @@ class PressureSolver:
 
 
 class FFTPressureSolver:
-    """Spectral pressure Poisson solver using DCT-II.
+    """Spectral pressure Poisson solver using DCT-II (pure Neumann BCs).
 
-    On a uniform rectangular grid the discrete Neumann Laplacian eigenvectors
-    are the DCT-II basis functions cos(πk(i+½)/N). Dividing the DCT of the
-    right-hand side by the corresponding eigenvalues yields the solution in
-    O(Nx·Ny·log(Nx·Ny)) time per solve, with no matrix factorization step.
-
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-
-    Attributes
-    ----------
-    eig_2d : ndarray, shape (Nx, Ny)
-        Precomputed eigenvalues of the 2D discrete Laplacian.  The zero-mode
-        (0,0) is set to ``inf`` so that dividing by it produces zero,
-        effectively pinning the mean pressure to zero.
+    The zero-mode is set to inf so the constant-mean pressure is
+    pinned to zero automatically.
     """
 
     def __init__(self, mesh):
@@ -217,65 +143,42 @@ class FFTPressureSolver:
         self.dx = mesh.dx
         self.dy = mesh.dy
 
-        # Precompute eigenvalues: λ = λx + λy
-        # λx_k = 2(1 - cos(πk/Nx)) / dx²   (k = 0 … Nx-1)
-        # These are the eigenvalues of the 1D Neumann Laplacian that arise
-        # from the Kronecker-product assembly of the 2D operator.
+        # 1D Neumann Laplacian eigenvalues: λ_k = 2(1 - cos(πk/N)) / h²
         kx = np.arange(self.Nx)
         ky = np.arange(self.Ny)
         eig_x = 2.0 * (1.0 - np.cos(np.pi * kx / self.Nx)) / (self.dx ** 2)
         eig_y = 2.0 * (1.0 - np.cos(np.pi * ky / self.Ny)) / (self.dy ** 2)
         eig_2d = eig_x[:, np.newaxis] + eig_y[np.newaxis, :]
 
-        # Pin the zero (constant) mode to avoid division by zero.
+        # Pin zero (constant) mode to avoid division by zero
         eig_2d[0, 0] = np.inf
         self.eig_2d = eig_2d
 
     def solve(self, u_star, v_star, dt):
         """Solve the pressure Poisson equation.
 
-        Parameters
-        ----------
-        u_star, v_star : ndarray
-            The intermediate velocity field.
-        dt : float
-            Time step.
-
-        Returns
-        -------
-        p : ndarray, shape (Nx+2, Ny+2)
-            The calculated pressure field including ghost cells.
+        Returns the pressure field including ghost cells, shape (Nx+2, Ny+2).
         """
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.dx, self.dy
 
-        # Compute divergence of intermediate velocity over active cells
         div = (
             (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / dx
             + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / dy
         )
 
-        # RHS: -∇²p = -(∇·u*)/dt  (the assembled operator A = -∇² is
-        # positive-definite, so we negate the divergence to match).
         rhs = (-div / dt)
 
-        # Forward DCT-II (orthonormal): transforms into the eigenbasis
         rhs_hat = dctn(rhs, type=2, norm="ortho", axes=(0, 1))
-
-        # Solve in frequency domain: P̂ = R̂ / λ
-        # The zero-mode (λ=∞) is automatically zeroed by floating-point
-        # division, but we set it explicitly for clarity.
         p_hat = rhs_hat / self.eig_2d
         p_hat[0, 0] = 0.0
 
-        # Inverse DCT-II to return to physical space
         p_interior = idctn(p_hat, type=2, norm="ortho", axes=(0, 1))
 
-        # Pack into ghost-cell array
         p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
         p[1:-1, 1:-1] = p_interior
 
-        # Enforce Neumann BCs on pressure ghost cells (zero gradient)
+        # Neumann ghost cells: zero gradient
         p[0, :] = p[1, :]
         p[-1, :] = p[-2, :]
         p[:, 0] = p[:, 1]
@@ -287,16 +190,7 @@ class FFTPressureSolver:
 class PeriodicPressureSolver:
     """Spectral pressure Poisson solver for periodic x + Neumann y.
 
-    Uses DFT along x (periodic) and DCT-II along y (Neumann) to solve
-    the pressure Poisson equation.  Eigenvalues are:
-
-        λx_k = 2(1 − cos(2πk/Nx)) / dx²   (periodic)
-        λy_k = 2(1 − cos(πk/Ny)) / dy²     (Neumann)
-
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
+    DFT along x (periodic) + DCT-II along y (Neumann).
     """
 
     def __init__(self, mesh):
@@ -307,99 +201,68 @@ class PeriodicPressureSolver:
 
         Nx, Ny = self.Nx, self.Ny
 
-        # Periodic eigenvalues in x: λx = 2(1 - cos(2πk/Nx)) / dx²
         kx = np.arange(Nx)
         eig_x = 2.0 * (1.0 - np.cos(2.0 * np.pi * kx / Nx)) / (self.dx ** 2)
 
-        # Neumann eigenvalues in y: λy = 2(1 - cos(πk/Ny)) / dy²
         ky = np.arange(Ny)
         eig_y = 2.0 * (1.0 - np.cos(np.pi * ky / Ny)) / (self.dy ** 2)
 
         eig_2d = eig_x[:, np.newaxis] + eig_y[np.newaxis, :]
 
-        # Pin the zero mode (kx=0, ky=0) to avoid division by zero
         eig_2d[0, 0] = np.inf
         self.eig_2d = eig_2d
 
     def solve(self, u_star, v_star, dt):
         """Solve the pressure Poisson equation.
 
-        Parameters
-        ----------
-        u_star, v_star : ndarray
-            The intermediate velocity field.
-        dt : float
-            Time step.
-
-        Returns
-        -------
-        p : ndarray, shape (Nx+2, Ny+2)
-            The calculated pressure field including ghost cells.
+        Returns the pressure field including ghost cells, shape (Nx+2, Ny+2).
         """
         Nx, Ny = self.Nx, self.Ny
 
-        # Compute divergence of intermediate velocity over active cells
         div = (
             (u_star[1:, 1:-1] - u_star[:-1, 1:-1]) / self.dx
             + (v_star[1:-1, 1:] - v_star[1:-1, :-1]) / self.dy
         )
 
-        # RHS: -∇²p = -(∇·u*)/dt
         rhs = (-div / dt)
 
-        # Forward DFT along x (periodic) + DCT-II along y (Neumann)
         from scipy.fft import fft, ifft, dctn, idctn
         rhs_hat = dctn(rhs, type=2, norm="ortho", axes=(1,))
         rhs_hat = fft(rhs_hat, axis=0)
 
-        # Solve in frequency domain
         p_hat = rhs_hat / self.eig_2d
         p_hat[0, 0] = 0.0
 
-        # Inverse: IDFT along x + IDCT-II along y
         p_interior = np.real(ifft(p_hat, axis=0))
         p_interior = idctn(p_interior, type=2, norm="ortho", axes=(1,))
 
-        # Pack into ghost-cell array
         p = np.zeros((Nx + 2, Ny + 2), dtype=np.float64)
         p[1:-1, 1:-1] = p_interior
 
-        # Periodic ghost cells in x
+        # Periodic in x
         p[0, :] = p[Nx, :]
         p[-1, :] = p[1, :]
-        # Neumann ghost cells in y
+        # Neumann in y
         p[:, 0] = p[:, 1]
         p[:, -1] = p[:, -2]
 
         return p
 
 
-# Threshold above which the FFT solver is used.
-# For grids larger than FFT_THRESHOLD × FFT_THRESHOLD, the O(N log N) FFT
-# solver is faster than the O(N^1.5) splu back-substitution.
+# Grid-size threshold above which the FFT solver is preferred (O(N log N)
+# vs O(N^1.5) for splu).
 FFT_THRESHOLD = 128
 
 
 def create_pressure_solver(mesh, bc=None):
     """Create the appropriate pressure solver for the given mesh.
 
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-    bc : BoundaryConditions, optional
-        Boundary conditions.  When an :class:`OutletWall` is present the
-        direct sparse solver is always used (the FFT solver assumes pure
-        Neumann BCs).  When any wall is :class:`PeriodicWall` in x,
-        :class:`PeriodicPressureSolver` is returned.
-
-    Returns
-    -------
-    PressureSolver or FFTPressureSolver or PeriodicPressureSolver
+    Returns PeriodicPressureSolver when any wall is periodic in x, the
+    direct sparse solver when an outlet is present (the FFT solver
+    assumes pure Neumann BCs), or the FFT solver for large pure-Neumann
+    grids.
     """
     if bc is not None:
-        # Use the BC object's helper methods rather than re-running
-        # isinstance checks here. (Audit finding P0-1.)
         if bc.has_periodic():
             return PeriodicPressureSolver(mesh)
         if bc.has_outlet() or (mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD):
@@ -408,4 +271,3 @@ def create_pressure_solver(mesh, bc=None):
     if mesh.Nx <= FFT_THRESHOLD and mesh.Ny <= FFT_THRESHOLD:
         return PressureSolver(mesh, bc=bc)
     return FFTPressureSolver(mesh)
-

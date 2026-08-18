@@ -1,12 +1,11 @@
 """Shared helper for loading and validating YAML configs.
 
 This module exists to break the duplication between the CLI's ``run``
-command and the example ``run.py`` scripts (audit findings P1-5 / P1-6).
-Both previously loaded YAML configs and constructed a Solver with
-slightly different boilerplate; the examples skipped
-:func:`~cfd_solver.solver.validate.validate_config` entirely, so typos
-in ``examples/*/config.yaml`` failed at runtime with cryptic errors
-rather than at load time with clear messages.
+command and the example ``run.py`` scripts. Both previously loaded YAML
+configs and constructed a Solver with slightly different boilerplate;
+the examples skipped :func:`~cfd_solver.solver.validate.validate_config`
+entirely, so typos in ``examples/*/config.yaml`` failed at runtime with
+cryptic errors rather than at load time with clear messages.
 
 Usage::
 

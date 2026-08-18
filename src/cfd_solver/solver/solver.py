@@ -1,33 +1,9 @@
 """Incompressible Navier-Stokes solver using Chorin's projection method.
 
-This module provides the main Solver class, which implements a fractional-step
-method (Chorin's projection method) to solve the incompressible Navier-Stokes
-equations on a staggered Arakawa C-grid.
-
-Chorin's Projection Method Steps:
----------------------------------
-1. Intermediate Velocity (Advection + Diffusion):
-   Calculate an intermediate velocity field u* by solving the momentum
-   equations without the pressure gradient:
-       (u* - u^n) / dt = -(u^n · ∇)u^n + nu * ∇²u^n
-   u* does not necessarily satisfy the incompressibility constraint (∇·u* = 0).
-
-2. Pressure Poisson Equation:
-   Solve for a pressure field 'p' that will project u* onto a divergence-free
-   space. This is derived from the requirement that ∇·u^{n+1} = 0:
-       ∇²p = (∇·u*) / dt
-
-3. Velocity Correction (Projection):
-   Correct the intermediate velocity using the calculated pressure gradient to
-   obtain the divergence-free velocity field at the next time step:
-       u^{n+1} = u* - dt * ∇p
-
-Example
--------
->>> from cfd_solver.solver import Solver
->>> s = Solver(grid_size=(64, 64), nu=0.01, dt=0.001, lid_speed=1.0)
->>> s.solve(200)
->>> s.save("output/result.png")
+The solver advances velocity on a staggered Arakawa C-grid using three
+fractional steps: an advection/diffusion predictor, a pressure Poisson
+solve, and a velocity correction (projection). Schemes for advection
+(upwind/central) and diffusion (Crank-Nicolson/explicit) are pluggable.
 """
 
 import os
@@ -50,41 +26,14 @@ from .viz import save_quiver as _save_quiver, save_contour, save_streamlines
 
 
 class Solver:
-    """Incompressible Navier-Stokes solver.
-
-    Coordinates the computational mesh, boundary conditions, and numerical
-    schemes to advance the fluid simulation in time.
-
-    Parameters
-    ----------
-    grid_size : tuple[int, int]
-        (Nx, Ny) number of computational cells.
-    nu : float
-        Kinematic viscosity of the fluid.
-    dt : float
-        Time step size.
-    lid_speed : float, optional
-        Tangential u-velocity on the top wall (default 1.0).
-    smooth_lid : bool, optional
-        Use a sinusoidal lid profile to avoid corner singularities (default True).
-    advection_scheme : str, optional
-        Numerical scheme for advection: "upwind" or "central" (default "upwind").
-    diffusion_scheme : str, optional
-        Numerical scheme for diffusion: "crank_nicolson" or "explicit"
-        (default "crank_nicolson").
-    Lx, Ly : float, optional
-        Physical dimensions of the domain (default 1.0, 1.0).
-    force : bool, optional
-        If True, bypass safety checks on grid size and memory (default False).
+    """Incompressible Navier-Stokes solver on a staggered C-grid.
 
     Attributes
     ----------
-    u : ndarray
-        u-velocity field (horizontal faces).
-    v : ndarray
-        v-velocity field (vertical faces).
+    u, v : ndarray
+        Velocity fields on the x-/y-faces (include ghost cells).
     p : ndarray
-        Pressure field (cell centers).
+        Pressure field at cell centers (include ghost cells).
     """
 
     def __init__(self, grid_size, nu, dt, lid_speed=1.0, smooth_lid=True,
@@ -93,7 +42,6 @@ class Solver:
                  boundary_config=None,
                  body_force=None,
                  initial_condition=None):
-        # --- Input Validation ---
         Nx, Ny = grid_size
         if Nx < 2 or Ny < 2:
             raise ValueError(f"grid_size must be at least (2, 2), got ({Nx}, {Ny})")
@@ -103,8 +51,8 @@ class Solver:
             raise ValueError(f"time step (dt) must be positive, got {dt}")
         if Lx <= 0 or Ly <= 0:
             raise ValueError(f"domain size (Lx, Ly) must be positive, got ({Lx}, {Ly})")
-        
-        # --- Resource Guardrails ---
+
+        # Resource guardrails: refuse grids that would exhaust memory
         total_cells = Nx * Ny
         if total_cells > 4_000_000 and not force:
             raise ValueError(
@@ -112,9 +60,8 @@ class Solver:
                 "Use force=True to override."
             )
 
-        # Estimate memory usage for main arrays and operators
-        # conservative multiplier for sparse matrices and intermediate buffers
-        est_mem_bytes = total_cells * 8 * 15 
+        # Conservative memory estimate: ~15 arrays at 8 bytes each
+        est_mem_bytes = total_cells * 8 * 15
         est_mem_gb = est_mem_bytes / (1024**3)
 
         if est_mem_gb > 4.0 and not force:
@@ -125,49 +72,43 @@ class Solver:
         elif est_mem_gb > 1.0:
             print(f"  [warning] Large grid detected. Estimated memory: {est_mem_gb:.1f} GB", file=sys.stderr)
 
-        # Ensure dt is physically sensible
+        # Reject physically nonsensical time steps up front
         dt_limit = 10.0 * (Lx + Ly) / max(abs(lid_speed), 1e-10)
         if dt > dt_limit and not force:
             raise ValueError(
                 f"dt={dt} is nonsensically large for this domain (limit: {dt_limit:.2f}). "
                 "Check your units or use force=True to override."
             )
-        # ------------------------
 
         self.mesh = Mesh(Lx, Ly, Nx, Ny)
 
-        # Build boundary conditions — accept pre-built object or legacy scalars
+        # Accept pre-built BC object or legacy scalar API
         if boundary_config is not None:
             self.bc = boundary_config
         else:
             self.bc = BoundaryConditions(top=lid_speed, smooth_lid=smooth_lid)
 
-        # Propagate domain size to BC object so that inlet profiles can
-        # use the correct channel height/length instead of assuming H=1.
-        # (Audit fix #6 — parabolic inlet profile used hardcoded H=1.0.)
+        # Inlet profiles use the real domain height, not a hardcoded H=1
         self.bc._domain_width = Lx
         self.bc._domain_height = Ly
 
-        # Stability check: CFL and diffusion constraints.
-        # IMPORTANT: Flow velocities can reach 2-3x the lid speed due to recirculation.
-        # We use a conservative limit to prevent blowup.
+        # Time-step limits: CFL and explicit-diffusion stability.
+        # Recirculation can reach 2-3x the lid speed, so keep a
+        # conservative margin.
         dx, dy = self.mesh.dx, self.mesh.dy
         dx_min = min(dx, dy)
 
-        # Advection stability: CFL = (|u|*dt/dx) + (|v|*dt/dy) < 1
-        # Conservatively assume max speed reaches 3x lid_speed during simulation
         effective_lid_speed = max(abs(self.bc.top), abs(self.bc.bottom), 1e-10)
         expected_max_speed = 3.0 * effective_lid_speed
         dt_advection = 0.5 * dx_min / expected_max_speed
-        
-        # Diffusion stability (mainly for explicit schemes): dt < dx²/(4*nu)
+
         if nu > 1e-10:
             dt_diffusion = 0.25 * dx_min**2 / nu
         else:
             dt_diffusion = float('inf')
-        
+
         dt_max = min(dt_advection, dt_diffusion)
-        
+
         if dt > dt_max and not force:
             raise ValueError(
                 f"dt={dt} exceeds the numerical stability limit ({dt_max:.4g}). "
@@ -175,10 +116,9 @@ class Solver:
                 f"and diffusion stability. "
                 f"Suggested dt <= {dt_max:.4g}. Use force=True to override."
             )
-        # Cell Peclet check: central differencing has no numerical dissipation
-        # and produces grid-scale oscillations ("wiggles") when the cell Peclet
-        # number Pe = |u|*dx/nu exceeds 2. This is independent of the CFL/diffusion
-        # time-step limits above, so warn explicitly here.
+        # Central differencing has no numerical dissipation and produces
+        # grid-scale oscillations when the cell Peclet number Pe = |u|*dx/nu
+        # exceeds 2. Warn independently of the stability limits above.
         if advection_scheme == "central" and nu > 1e-10:
             cell_peclet = expected_max_speed * dx_min / nu
             if cell_peclet > 2.0 and not force:
@@ -197,28 +137,23 @@ class Solver:
         self.advection_scheme = advection_scheme
         self.diffusion_scheme = diffusion_scheme
 
-        # Detect periodic directions
-        # Previously checked ANY wall, including top/bottom, which would
-        # incorrectly activate x-periodic logic for y-periodic BCs.
-        # (Audit fix #3.)
+        # Periodic is only active when the opposite wall pair uses it
         self._periodic_x = (isinstance(self.bc.walls.get('left'), PeriodicWall) and
                             isinstance(self.bc.walls.get('right'), PeriodicWall))
 
-        # Initialize velocity and pressure arrays
+        # Velocity/pressure arrays and pre-allocated buffers
         self.u = np.zeros(self.mesh.shape_u)
         self.v = np.zeros(self.mesh.shape_v)
         self.p = np.zeros(self.mesh.shape_p)
 
-        # Pre-allocated intermediate buffers (avoids per-step allocation)
         self._u_star = np.zeros(self.mesh.shape_u)
         self._v_star = np.zeros(self.mesh.shape_v)
 
-        # Pre-allocated contiguous buffers for diagnostics
+        # Contiguous buffers for diagnostics (avoid per-call allocation)
         self._u_phys = np.empty((Nx + 1, Ny), dtype=np.float64)
         self._v_phys = np.empty((Nx, Ny + 1), dtype=np.float64)
         self._div_buf = np.empty((Nx, Ny), dtype=np.float64)
 
-        # Configure numerical schemes
         if advection_scheme == "upwind":
             self._advection_fn = advection.upwind
         elif advection_scheme == "central":
@@ -227,14 +162,9 @@ class Solver:
             raise ValueError(f"Unknown advection scheme: {advection_scheme}")
 
         if diffusion_scheme == "crank_nicolson":
-            # Crank-Nicolson matrices encode the BC type at construction time.
-            # Periodic walls require a fundamentally different matrix structure
-            # (circulant) which the current CrankNicolson / FFTCrankNicolson
-            # solvers do not yet support.  Fall back to explicit Euler in that
-            # case, but emit a LOUD warning so the user knows their simulation
-            # is running with a different (less stable, first-order in time)
-            # diffusion scheme than they asked for.
-            # (Audit finding P0-2 — previously this downgrade was silent.)
+            # CN matrices encode the BC type at construction time; the
+            # periodic case needs a circulant structure that the current
+            # solvers don't support, so fall back to explicit Euler loudly.
             if self.bc.has_periodic():
                 self._diffusion = None
                 if not force:
@@ -256,7 +186,6 @@ class Solver:
 
         self._pressure = create_pressure_solver(self.mesh, self.bc)
 
-        # Apply initial boundary conditions
         self.bc.apply(self.u, self.v, Nx, Ny)
 
     @property
@@ -290,31 +219,22 @@ class Solver:
         return self.mesh.Ly
 
     def step(self):
-        """Advance the simulation by one time step (dt).
-
-        Executes the three steps of Chorin's projection method:
-        1. Calculate intermediate velocity (u*, v*) via advection + diffusion.
-        2. Solve the Pressure Poisson Equation for 'p'.
-        3. Correct (project) the velocity field using the pressure gradient.
-        """
+        """Advance the simulation by one time step."""
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.mesh.dx, self.mesh.dy
         dt = self.dt
 
-        # Ensure BCs are up to date
         self.bc.apply(self.u, self.v, Nx, Ny)
 
-        # 1. Prediction Step: Advection + Diffusion
+        # Predictor: advection + diffusion
         adv_u, adv_v = self._advection_fn(self.u, self.v, dx, dy)
 
         if self._diffusion is not None:
-            # Semi-implicit Crank-Nicolson
             u_star, v_star = self._diffusion.solve(
                 self.u, self.v, adv_u, adv_v,
                 u_out=self._u_star, v_out=self._v_star,
             )
         else:
-            # Explicit Forward Euler
             from .diffusion import explicit
             u_star, v_star = explicit(
                 self.u, self.v, adv_u, adv_v, dx, dy, dt,
@@ -322,22 +242,14 @@ class Solver:
                 u_out=self._u_star, v_out=self._v_star,
             )
 
-        # Body force: add external forces to intermediate velocity
+        # Body force
         if self._body_force_fn is not None:
             fu, fv = self._body_force_fn(self.u, self.v, self.time)
             u_star += dt * fu
             v_star += dt * fv
 
-        # Periodic x: the advection/diffusion step doesn't update u_star
-        # at the boundary face (i=0/i=Nx), so we compute the full
-        # prediction (advection + diffusion) there using the wrapping
-        # Laplacian.
-        # Previously only diffusion was applied, discarding the advection
-        # term — a physical error that caused missing momentum at the
-        # periodic boundary.  Also, the Laplacian mixed u_star and self.u
-        # inconsistently.  Now we use self.u consistently (explicit eval)
-        # and include the advection term.
-        # (Audit fixes #2 and #5.)
+        # Periodic x: the boundary face (i=0=i=Nx) is a real degree of
+        # freedom; compute its full prediction with the wrapping Laplacian.
         if self._periodic_x:
             dx2, dy2 = dx**2, dy**2
             lap_u_0 = (self.u[1, 1:-1] - 2.0 * self.u[0, 1:-1] + self.u[-2, 1:-1]) / dx2 + \
@@ -345,27 +257,24 @@ class Solver:
             u_star[0, 1:-1] = self.u[0, 1:-1] + dt * (-adv_u[0, 1:-1] + self.nu * lap_u_0)
             u_star[-1, 1:-1] = u_star[0, 1:-1]
 
-        # 2. Pressure Step: Solve ∇²p = (∇·u*) / dt
+        # Pressure solve
         self.p[:] = self._pressure.solve(u_star, v_star, dt)
 
-        # 3. Correction Step: u^{n+1} = u* - dt * ∇p
-        # On the staggered C-grid, pressure gradients are computed at face locations.
+        # Projection: u^{n+1} = u* - dt * ∇p (gradients at face locations)
         grad_p_x = (self.p[2:-1, 1:-1] - self.p[1:-2, 1:-1]) / dx
         grad_p_y = (self.p[1:-1, 2:-1] - self.p[1:-1, 1:-2]) / dy
 
         self.u[1:-1, 1:-1] = u_star[1:-1, 1:-1] - dt * grad_p_x
         self.v[1:-1, 1:-1] = v_star[1:-1, 1:-1] - dt * grad_p_y
 
-        # Periodic x: update u at the periodic face (i=0 = i=Nx)
+        # Periodic x: correct the periodic face too
         if self._periodic_x:
             grad_p_x_per = (self.p[1, 1:-1] - self.p[-2, 1:-1]) / dx
             self.u[0, 1:-1] = u_star[0, 1:-1] - dt * grad_p_x_per
             self.u[-1, 1:-1] = self.u[0, 1:-1]
 
-        # Finalize BCs for the new velocity field
         self.bc.apply(self.u, self.v, Nx, Ny)
 
-        # Advance physical time
         self.time += dt
 
     def solve(self, steps=None, verbose=True, simulation_time=None,
@@ -373,32 +282,11 @@ class Solver:
         """Run the simulation.
 
         Either ``steps`` or ``simulation_time`` must be provided.  When
-        ``simulation_time`` is given, the number of steps is computed
-        automatically as ``ceil(simulation_time / dt)`` and the ``steps``
-        argument is ignored.
+        ``simulation_time`` is given, the step count is computed as
+        ``ceil(simulation_time / dt)`` and ``steps`` is ignored.
 
-        Parameters
-        ----------
-        steps : int, optional
-            Number of time steps to advance.  Required if
-            ``simulation_time`` is not set.
-        verbose : bool, optional
-            If True, print a progress bar and diagnostics (default True).
-        simulation_time : float, optional
-            Physical time (in seconds) to simulate.  When set, overrides
-            ``steps``.
-        convergence_tol : float, optional
-            If set, stop early when max|u^{n+1} - u^n| < convergence_tol
-            for ``convergence_window`` consecutive steps.
-        convergence_window : int, optional
-            Number of consecutive steps below tolerance before declaring
-            convergence (default 100).
-
-        Returns
-        -------
-        bool
-            True if all steps completed, False if the simulation blew up
-            (velocity field became NaN/Inf) and was aborted early.
+        Returns True if all steps completed, False if the velocity field
+        blew up (NaN/Inf) and the run was aborted.
         """
         if simulation_time is not None:
             if simulation_time <= 0:
@@ -408,7 +296,7 @@ class Solver:
             raise ValueError("Provide either steps > 0 or simulation_time > 0")
         if steps > 1_000_000:
             print(f"  [warning] Requesting {steps:,} steps. This may take a long time.", file=sys.stderr)
-        
+
         # Apply initial condition if provided
         if self._initial_condition_fn is not None:
             self.u[:], self.v[:], self.p[:] = self._initial_condition_fn(self.mesh)
@@ -423,11 +311,10 @@ class Solver:
         for i in range(steps):
             self.step()
 
-            # Stability check: ensure velocities haven't exploded
+            # Abort on NaN/Inf velocities, with a suggested safe dt
             if is_blowup(self.u, self.v):
                 if verbose:
                     c = self.cfl()
-                    # If CFL is inf, the field has NaN/Inf; suggest much smaller dt
                     if c == np.inf:
                         safe_dt = self.dt * 0.1
                     else:
@@ -441,10 +328,8 @@ class Solver:
                     )
                 return False
 
-            # Steady-state convergence check
-            # Previously only monitored u, ignoring v — could declare
-            # convergence prematurely while v is still evolving.
-            # (Audit fix #4.)
+            # Steady-state check: require both velocity components to
+            # satisfy the convergence criterion.
             if convergence_tol is not None:
                 delta_u = np.max(np.abs(self.u - u_old))
                 delta_v = np.max(np.abs(self.v - v_old))
@@ -472,11 +357,10 @@ class Solver:
                 elapsed = time.time() - t0
                 rate = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (steps - i - 1) / rate if rate > 0 else 0
-                # Compute diagnostics every 10 steps to reduce overhead
+                # Diagnostics every 10 steps cut the overhead of the norm calls
                 if i % 10 == 0 or i == steps - 1:
                     div = self.max_divergence()
                     c = self.cfl()
-                # Handle inf CFL gracefully in display
                 cfl_str = f"{c:.3f}" if c != np.inf else "Inf"
                 sys.stdout.write(
                     f"\r  [{bar}] {i+1:4d}/{steps}  "
@@ -491,7 +375,7 @@ class Solver:
         return True
 
     def divergence_norm(self):
-        """Calculate the RMS divergence of the current velocity field."""
+        """RMS divergence of the current velocity field."""
         self._u_phys[:] = self.u[:, 1:-1]
         self._v_phys[:] = self.v[1:-1, :]
         self._div_buf[:] = (self._u_phys[1:, :] - self._u_phys[:-1, :]) / self.dx + \
@@ -499,7 +383,7 @@ class Solver:
         return float(np.sqrt(np.mean(self._div_buf ** 2)))
 
     def max_divergence(self, interior_only=False):
-        """Calculate the maximum absolute divergence."""
+        """Maximum absolute divergence of the current velocity field."""
         self._u_phys[:] = self.u[:, 1:-1]
         self._v_phys[:] = self.v[1:-1, :]
         self._div_buf[:] = (self._u_phys[1:, :] - self._u_phys[:-1, :]) / self.dx + \
@@ -510,7 +394,7 @@ class Solver:
         return float(np.max(np.abs(d)))
 
     def cfl(self):
-        """Calculate the current maximum CFL number."""
+        """Current maximum CFL number."""
         if not (np.all(np.isfinite(self.u)) and np.all(np.isfinite(self.v))):
             return np.inf
         self._u_phys[:] = self.u[:, 1:-1]
@@ -520,56 +404,19 @@ class Solver:
         return u_max * self.dt / self.dx + v_max * self.dt / self.dy
 
     def save(self, path, skip=None, scale=None):
-        """Save a visualization of pressure and velocity magnitude.
-
-        Parameters
-        ----------
-        path : str
-            File path to save the image.
-        skip : int, optional
-            Number of points to skip for quiver plot (if included).
-        scale : float, optional
-            Scaling factor for vectors.
-        """
+        """Save a visualization of pressure and velocity magnitude."""
         save_contour(self.mesh, self.u, self.v, self.p, path, skip, scale)
 
     def save_quiver(self, path, skip=None, scale=None):
-        """Save a velocity vector (quiver) plot.
-
-        Parameters
-        ----------
-        path : str
-            File path to save the image.
-        skip : int, optional
-            Number of vectors to skip in each direction for clarity.
-        scale : float, optional
-            Scaling factor for vector lengths.
-        """
+        """Save a velocity vector (quiver) plot."""
         _save_quiver(self.mesh, self.u, self.v, path, skip, scale)
 
     def save_streamlines(self, path, density=2.0):
-        """Save a streamline plot of the velocity field and pressure contours.
-
-        Parameters
-        ----------
-        path : str
-            File path to save the image.
-        density : float, optional
-            Density of streamlines in the plot.
-        """
+        """Save a streamline plot of the velocity field and pressure contours."""
         save_streamlines(self.mesh, self.u, self.v, self.p, path, density)
 
     def checkpoint(self, path):
-        """Save the current solver state to a compressed .npz file.
-
-        The checkpoint includes all velocity and pressure data, as well
-        as solver configuration, allowing the simulation to be resumed.
-
-        Parameters
-        ----------
-        path : str
-            Destination file path. Parent directories are created automatically.
-        """
+        """Save the current solver state to a compressed .npz file."""
         parent = os.path.dirname(os.path.abspath(path))
         os.makedirs(parent, exist_ok=True)
         np.savez_compressed(
@@ -589,34 +436,9 @@ class Solver:
                         initial_condition=None, boundary_config=None):
         """Load a solver instance from a checkpoint file.
 
-        Parameters
-        ----------
-        path : str
-            Path to the .npz checkpoint file.
-        force : bool, optional
-            If True, bypass safety checks during initialization.
-        body_force : callable, optional
-            Re-attach a body-force function to the restored solver.
-            Checkpoints do not serialize Python callables, so any
-            body force from the original simulation MUST be re-supplied
-            here.  A loud warning is printed if this is None and the
-            caller is expected to have had one.  (Audit finding P2-12.)
-        initial_condition : callable, optional
-            Re-attach an initial-condition function.  Same caveat as
-            ``body_force`` — not serialized, must be re-supplied.
-        boundary_config : BoundaryConditions, optional
-            Re-attach a full boundary-conditions object.  Checkpoints
-            only serialize ``lid_speed`` and ``smooth_lid`` (the legacy
-            scalar attributes); any non-default wall types (InletWall,
-            OutletWall, PeriodicWall, FreeSlipWall) are lost on
-            checkpoint round-trip.  Pass the original BC object here
-            to restore it.  A warning is printed if this is None and
-            the checkpoint appears to have used non-default BCs.
-
-        Returns
-        -------
-        Solver
-            A new Solver instance with state restored from the file.
+        Python callables (body_force, initial_condition) and non-default
+        wall types are not serialized, so they MUST be re-supplied by the
+        caller; a warning is printed when they are missing.
         """
         if not os.path.exists(path):
             if not path.endswith(".npz") and os.path.exists(path + ".npz"):
@@ -639,12 +461,10 @@ class Solver:
         advection_scheme = str(data["advection_scheme"]) if "advection_scheme" in data else "upwind"
         diffusion_scheme = str(data["diffusion_scheme"]) if "diffusion_scheme" in data else "crank_nicolson"
 
-        # ── Audit finding P2-12 — warn about unserialised state ───────
-        # The legacy checkpoint format only stores lid_speed + smooth_lid.
-        # Any non-default BC (InletWall, OutletWall, PeriodicWall,
-        # FreeSlipWall) and any body_force / initial_condition are
-        # silently lost.  Warn loudly so users do not accidentally
-        # resume, e.g., a channel-flow sim as a lid-driven cavity.
+        # Warn about unserialized state: the legacy checkpoint format only
+        # stores lid_speed + smooth_lid, so resuming without the original
+        # BC object silently turns non-default walls (e.g. a channel-flow
+        # inlet/outlet) back into a lid-driven cavity.
         if boundary_config is None and not force:
             print(
                 "  [WARNING] from_checkpoint: boundary_config not supplied.\n"
@@ -656,8 +476,8 @@ class Solver:
                 file=sys.stderr,
             )
         if body_force is None and not force:
-            # We cannot detect whether the original had a body force
-            # (it is not serialised), so we warn unconditionally.
+            # Cannot detect whether the original had a body force (it is
+            # not serialized), so warn unconditionally.
             print(
                 "  [WARNING] from_checkpoint: body_force not supplied.\n"
                 "            If the original simulation used a body force, it is\n"
@@ -666,7 +486,6 @@ class Solver:
                 "            restore, or force=True to silence.",
                 file=sys.stderr,
             )
-        # ────────────────────────────────────────────────────────────────
 
         solver = cls(grid_size=(Nx, Ny), nu=nu, dt=dt, Lx=Lx, Ly=Ly,
                      lid_speed=lid_speed, smooth_lid=smooth_lid,

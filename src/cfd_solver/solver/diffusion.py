@@ -1,28 +1,7 @@
-"""Diffusion schemes for staggered incompressible flow with ghost cells.
+"""Diffusion and predictor schemes for the staggered-grid solver.
 
-This module provides methods to solve the viscous diffusion term (nu * ∇²u)
-in the Navier-Stokes equations.
-
-Viscous Term:
--------------
-The diffusion term represents the internal friction within the fluid.
-In 2D, for velocity components (u, v), it is:
-    ∂u/∂t = nu * (∂²u/∂x² + ∂²u/∂y²)
-    ∂v/∂t = nu * (∂²v/∂x² + ∂²v/∂y²)
-
-Chorin's Projection Method:
----------------------------
-In the context of the fractional step method, diffusion and advection are
-combined to calculate an intermediate "star" velocity field (u*, v*) that
-does not yet satisfy the incompressibility constraint.
-
-Available schemes:
-------------------
-1. Explicit: A Forward Euler discretization. It is simple to implement but has
-   a strict stability requirement: dt <= (min(dx, dy)² / (4 * nu)).
-2. Crank-Nicolson: A semi-implicit scheme that averages the Laplacian at the
-   current and next time steps. It is second-order accurate in time and
-   unconditionally stable, allowing for larger time steps.
+Includes explicit and Crank-Nicolson time integration, with an FFT
+spectral variant for large grids.
 """
 
 import numpy as np
@@ -35,35 +14,10 @@ from .bc import PeriodicWall
 
 def explicit(u, v, adv_u, adv_v, dx, dy, dt, nu, bc, Nx, Ny,
              u_out=None, v_out=None):
-    """Forward Euler diffusion + advection predictor with ghost cells.
+    """Forward Euler diffusion + advection predictor.
 
-    Calculates the intermediate velocity (u*, v*) by explicitly stepping
+    Computes the intermediate velocity (u*, v*) by explicitly stepping
     forward in time using the current advection and diffusion.
-
-    Parameters
-    ----------
-    u, v : ndarray
-        Current velocity components.
-    adv_u, adv_v : ndarray
-        Advective terms calculated by an advection scheme.
-    dx, dy : float
-        Grid spacing.
-    dt : float
-        Time step.
-    nu : float
-        Kinematic viscosity.
-    bc : BoundaryConditions
-        Object to enforce boundary values.
-    Nx, Ny : int
-        Number of grid cells.
-    u_out, v_out : ndarray, optional
-        Pre-allocated output arrays.  If provided the result is written
-        here instead of allocating new arrays (zero-copy path).
-
-    Returns
-    -------
-    u_star, v_star : ndarray
-        Intermediate velocity fields with boundary conditions applied.
     """
     dx2, dy2 = dx**2, dy**2
 
@@ -83,7 +37,6 @@ def explicit(u, v, adv_u, adv_v, dx, dy, dt, nu, bc, Nx, Ny,
     lap_v = (v[2:, 1:-1] - 2 * v[1:-1, 1:-1] + v[:-2, 1:-1]) / dx2 + \
             (v[1:-1, 2:] - 2 * v[1:-1, 1:-1] + v[1:-1, :-2]) / dy2
 
-    # Explicit step: u* = u + dt * (-advection + nu * Laplacian)
     u_star[1:-1, 1:-1] = u[1:-1, 1:-1] + dt * (-adv_u[1:-1, 1:-1] + nu * lap_u)
     v_star[1:-1, 1:-1] = v[1:-1, 1:-1] + dt * (-adv_v[1:-1, 1:-1] + nu * lap_v)
 
@@ -92,28 +45,10 @@ def explicit(u, v, adv_u, adv_v, dx, dy, dt, nu, bc, Nx, Ny,
 
 
 class CrankNicolson:
-    """Semi-implicit Crank-Nicolson diffusion solver.
+    """Semi-implicit Crank-Nicolson predictor for viscous diffusion.
 
-    The Crank-Nicolson method treats the diffusion term implicitly by solving
-    the linear system: (I - 0.5*dt*nu*L) u* = (I + 0.5*dt*nu*L) u - dt * advection.
-    This allows for much larger time steps than the explicit method while
-    maintaining stability and second-order accuracy.
-
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-    nu : float
-        Kinematic viscosity.
-    dt : float
-        Time step.
-    bc : BoundaryConditions
-        Object to enforce boundary values.
-
-    Attributes
-    ----------
-    A_u, A_v : csc_matrix
-        The implicit operators for u and v velocities.
+    Solves (I - 0.5*dt*nu*L) u* = (I + 0.5*dt*nu*L) u - dt*advection.
+    The implicit operators are built and factorized once at construction.
     """
 
     def __init__(self, mesh, nu, dt, bc):
@@ -125,7 +60,7 @@ class CrankNicolson:
         self.dx = mesh.dx
         self.dy = mesh.dy
 
-        # Build and pre-factorize the matrices once to speed up the solve() calls
+        # Build and pre-factorize the matrices once
         self.A_u = self._build_u_matrix().tocsc()
         self.A_v = self._build_v_matrix().tocsc()
 
@@ -136,10 +71,8 @@ class CrankNicolson:
     def _ghost_cell_coeffs(wall, component='u'):
         """Return (has_dirichlet, wall_value) for the implicit Laplacian.
 
-        .. deprecated:: 
-            This static method is preserved for backward compatibility but
-            now simply delegates to ``wall.ghost_cell_coeffs(component)``.
-            New code should call the wall object's method directly.
+        Delegates to ``wall.ghost_cell_coeffs(component)``; kept for
+        backward compatibility.
         """
         return wall.ghost_cell_coeffs(component)
 
@@ -147,8 +80,6 @@ class CrankNicolson:
         """Build the (I - 0.5*dt*nu*L) operator for u unknowns.
 
         Unknowns are at active interior u-faces: i=1..Nx-1, j=1..Ny.
-        Boundary conditions are incorporated into the operator where they
-        affect the implicit calculation.
         """
         Nx, Ny = self.Nx, self.Ny
         dx2, dy2 = self.dx**2, self.dy**2
@@ -233,34 +164,14 @@ class CrankNicolson:
         return A
 
     def update_matrices(self):
-        """Rebuild and re-factorize the implicit operators after a BC change.
-
-        Call this whenever boundary conditions change type (e.g. switching
-        from NoSlip to FreeSlip) to keep the implicit solve consistent.
-        """
+        """Rebuild and re-factorize the implicit operators after a BC change."""
         self.A_u = self._build_u_matrix().tocsc()
         self.A_v = self._build_v_matrix().tocsc()
         self._solve_u = splu(self.A_u).solve
         self._solve_v = splu(self.A_v).solve
 
     def solve(self, u, v, adv_u, adv_v, u_out=None, v_out=None):
-        """Advance diffusion + advection to get intermediate velocity (u*, v*).
-
-        Parameters
-        ----------
-        u, v : ndarray
-            Current velocity components.
-        adv_u, adv_v : ndarray
-            Advective terms.
-        u_out, v_out : ndarray, optional
-            Pre-allocated output arrays.  If provided the result is written
-            here instead of allocating new arrays (zero-copy path).
-
-        Returns
-        -------
-        u_star, v_star : ndarray
-            Intermediate velocity field.
-        """
+        """Advance diffusion + advection to get intermediate velocity (u*, v*)."""
         Nx, Ny = self.Nx, self.Ny
         dx, dy = self.dx, self.dy
         dx2, dy2 = dx**2, dy**2
@@ -285,17 +196,8 @@ class CrankNicolson:
                 (v[1:-1, 2:] - 2 * v[1:-1, 1:-1] + v[1:-1, :-2]) / dy2
 
         # --- Solve for u ---
-        # RHS = u + dt*(-advection + 0.5*nu*lap_u)
         rhs_u = u[1:-1, 1:-1] - dt * adv_u[1:-1, 1:-1] + 0.5 * dt * nu * lap_u
 
-        # Add boundary contributions for the implicit part.
-        # x-direction Dirichlet: the unknowns adjacent to the side walls
-        # couple to u at the wall faces (i=0, i=Nx), which is the wall-NORMAL
-        # velocity and is exactly 0 for an impermeable cavity (bc.apply sets
-        # those faces to 0). NOTE: bc.left / bc.right are the TANGENTIAL
-        # v-velocities on those walls and belong to the v-equation only, so
-        # the u-RHS receives no contribution here.
-        
         # y-direction (via ghost cells)
         bottom_wall = self.bc.walls.get('bottom')
         if bottom_wall is not None:
@@ -316,7 +218,6 @@ class CrankNicolson:
         u_star[1:-1, 1:-1] = u_flat.reshape((Nx - 1, Ny), order="F")
 
         # --- Solve for v ---
-        # RHS = v + dt*(-advection + 0.5*nu*lap_v)
         rhs_v = v[1:-1, 1:-1] - dt * adv_v[1:-1, 1:-1] + 0.5 * dt * nu * lap_v
 
         # x-direction (via ghost cells)
@@ -342,9 +243,7 @@ class CrankNicolson:
 class FFTCrankNicolson:
     """Spectral Crank-Nicolson diffusion solver using DST / DCT.
 
-    Solves the same (I - 0.5*dt*nu*L) u* = (I + 0.5*dt*nu*L) u - dt*adv
-    system as :class:`CrankNicolson`, but diagonalises the 2-D Laplacian
-    analytically in the frequency domain.
+    Diagonalises the Laplacian analytically in the frequency domain.
 
     Boundary conventions (staggered Arakawa C-grid with ghost cells):
 
@@ -359,17 +258,6 @@ class FFTCrankNicolson:
       - y: Dirichlet walls (v=0) → DST-I  (Ny-1 points)
 
     Each solve is O(Nx*Ny*log(Nx*Ny)) with no factorisation step.
-
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-    nu : float
-        Kinematic viscosity.
-    dt : float
-        Time step.
-    bc : BoundaryConditions
-        Ghost-cell boundary conditions.
     """
 
     def __init__(self, mesh, nu, dt, bc):
@@ -386,8 +274,7 @@ class FFTCrankNicolson:
     def _is_noslip(self, wall):
         """Check if a wall behaves as NoSlip for the implicit Laplacian.
 
-        Delegates to ``wall.is_noslip()``.  PeriodicWall returns False
-        (handled separately by the caller).
+        PeriodicWall returns False (handled separately by the caller).
         """
         if wall is None:
             return True  # default: treat as NoSlip
@@ -420,7 +307,6 @@ class FFTCrankNicolson:
             eig_y_u = 2.0 * (1.0 - np.cos(np.pi * ky_u / nj_u))
             self._u_y_type = 3  # DCT-II (type=3 in scipy is DCT-II with ortho)
         else:
-            # Mixed: fall back to sparse solver
             raise ValueError(
                 "FFTCrankNicolson does not support mixed NoSlip/FreeSlip "
                 "on y-boundaries for the u-equation. Use CrankNicolson."
@@ -459,23 +345,7 @@ class FFTCrankNicolson:
         self._build_eigenvalues()
 
     def solve(self, u, v, adv_u, adv_v, u_out=None, v_out=None):
-        """Advance diffusion + advection to get intermediate velocity (u*, v*).
-
-        Parameters
-        ----------
-        u, v : ndarray
-            Current velocity components.
-        adv_u, adv_v : ndarray
-            Advective terms.
-        u_out, v_out : ndarray, optional
-            Pre-allocated output arrays.  If provided the result is written
-            here instead of allocating new arrays (zero-copy path).
-
-        Returns
-        -------
-        u_star, v_star : ndarray
-            Intermediate velocity field.
-        """
+        """Advance diffusion + advection to get intermediate velocity (u*, v*)."""
         Nx, Ny = self.Nx, self.Ny
         dx2, dy2 = self.dx**2, self.dy**2
         nu, dt = self.nu, self.dt
@@ -552,30 +422,16 @@ class FFTCrankNicolson:
 def create_diffusion_solver(mesh, nu, dt, bc, threshold=128):
     """Create the optimal diffusion solver for the given grid size.
 
-    Parameters
-    ----------
-    mesh : Mesh
-        The computational mesh.
-    nu : float
-        Kinematic viscosity.
-    dt : float
-        Time step.
-    bc : BoundaryConditions
-        Boundary conditions.
-    threshold : int
-        Grid size threshold.  FFT is used when max(Nx, Ny) >= threshold.
-
-    Returns
-    -------
-    solver
-        Either :class:`CrankNicolson` or :class:`FFTCrankNicolson`.
+    FFT is used when max(Nx, Ny) >= threshold; falls back to sparse
+    Crank-Nicolson when the BC combination is unsupported by the
+    spectral solver.
     """
     if max(mesh.Nx, mesh.Ny) >= threshold:
         try:
             return FFTCrankNicolson(mesh, nu, dt, bc)
         except ValueError:
-            #* FFTCrankNicolson does not support mixed NoSlip/FreeSlip
-            #  (or NoSlip/Outlet) BC combinations. Fall back to the
-            #  sparse CrankNicolson solver which handles all BC types.
+            # Mixed NoSlip/FreeSlip (or NoSlip/Outlet) BC combinations
+            # are unsupported by the spectral solver; the sparse solver
+            # handles all BC types.
             pass
     return CrankNicolson(mesh, nu, dt, bc)

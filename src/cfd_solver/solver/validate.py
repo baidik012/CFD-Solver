@@ -5,12 +5,10 @@ it to the Solver. Returns a list of human-readable error strings;
 an empty list means the config is valid.
 """
 
-# ────────────────────────────────────────────────────────────────────────────
 # Single source of truth for wall-related validation.
 # Previously the per-wall field spec was duplicated 4× (once per wall),
 # which made adding a new wall type a 4-site edit. Now it is defined once
-# and reused. (Audit finding P0-3.)
-# ────────────────────────────────────────────────────────────────────────────
+# and reused.
 
 # Allowed wall type strings. Kept in sync with cli._WALL_TYPE_MAP.
 WALL_TYPE_VALUES = ["wall", "inlet", "outlet", "periodic", "free_slip"]
@@ -51,9 +49,6 @@ _SCHEMA = {
         "type": dict,
         "fields": {
             "smooth_lid": {"type": bool},
-            # All four walls share the same schema (see _PER_WALL_SCHEMA above).
-            # The legacy dead "other" key has been removed; it was never read
-            # by the parser or the Solver and only caused confusion.
             "top":    dict(_PER_WALL_SCHEMA),
             "bottom": dict(_PER_WALL_SCHEMA),
             "left":   dict(_PER_WALL_SCHEMA),

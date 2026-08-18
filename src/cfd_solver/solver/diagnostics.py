@@ -1,7 +1,6 @@
 """Flow diagnostics for staggered incompressible solvers.
 
-This module provides tools to monitor the physical and numerical health of the
-simulation, including mass conservation (divergence) and stability (CFL).
+Provides mass conservation (divergence) and stability (CFL) monitoring.
 """
 
 import numpy as np
@@ -9,10 +8,6 @@ import numpy as np
 
 def divergence(u, v, dx, dy, interior_only=False):
     """Pointwise divergence ∇·u = ∂u/∂x + ∂v/∂y at cell centers.
-
-    In an incompressible flow, the divergence should be zero everywhere.
-    Measuring the divergence is the primary way to verify the success of the
-    pressure projection step.
 
     Parameters
     ----------
@@ -23,12 +18,12 @@ def divergence(u, v, dx, dy, interior_only=False):
     dx, dy : float
         Grid spacing.
     interior_only : bool, optional
-        If True, exclude boundary cells from the result (default False).
+        If True, exclude boundary cells from the result.
 
     Returns
     -------
-    div : ndarray, shape (Nx, Ny) or smaller
-        Divergence calculated at cell centers.
+    div : ndarray
+        Divergence at cell centers.
     """
     u_phys = u[:, 1:-1]
     v_phys = v[1:-1, :]
@@ -39,67 +34,27 @@ def divergence(u, v, dx, dy, interior_only=False):
 
 
 def divergence_norm(u, v, dx, dy):
-    """Calculate the Root Mean Square (RMS) divergence.
-
-    Provides a global measure of how well incompressibility is satisfied.
-
-    Returns
-    -------
-    float
-        The L2 norm of the divergence field.
-    """
+    """RMS divergence: global measure of incompressibility error."""
     return np.sqrt(np.mean(divergence(u, v, dx, dy) ** 2))
 
 
 def max_divergence(u, v, dx, dy, interior_only=False):
-    """Calculate the maximum absolute divergence in the field.
-
-    Useful for detecting local violations of incompressibility,
-    often near boundaries.
-
-    Returns
-    -------
-    float
-        The maximum absolute divergence value.
-    """
+    """Maximum absolute divergence: detects local incompressibility violations."""
     return np.max(np.abs(divergence(u, v, dx, dy, interior_only)))
 
 
 def cfl(u, v, dx, dy, dt):
-    """Calculate the maximum Courant-Friedrichs-Lewy (CFL) number.
+    """Maximum CFL number: max(|u|*dt/dx + |v|*dt/dy).
 
-    The CFL number is a measure of how much information travels across a
-    grid cell in a single time step:
-        CFL = max(|u|*dt/dx + |v|*dt/dy)
-    For numerical stability in explicit schemes, the CFL number
-    should typically be less than 1.0.
-    
-    If the velocity field contains NaN or Inf (indicating blowup),
-    this function returns np.inf.
-
-    Returns
-    -------
-    float
-        The maximum CFL number in the domain, or np.inf if blowup detected.
+    Returns np.inf if velocity field contains NaN/Inf (blowup).
     """
-    # Check for blowup (NaN/Inf) before computing max
     if not (np.all(np.isfinite(u)) and np.all(np.isfinite(v))):
         return np.inf
-    
     u_max = np.max(np.abs(u[:, 1:-1]))
     v_max = np.max(np.abs(v[1:-1, :]))
     return u_max * dt / dx + v_max * dt / dy
 
 
 def is_blowup(u, v):
-    """Check if the simulation has become numerically unstable.
-
-    Instability (blowup) is characterized by velocity values becoming
-    extremely large (Inf) or undefined (NaN).
-
-    Returns
-    -------
-    bool
-        True if the velocity field contains NaN or Inf values.
-    """
+    """True if velocity field contains NaN or Inf."""
     return not (np.all(np.isfinite(u)) and np.all(np.isfinite(v)))
