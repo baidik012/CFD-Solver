@@ -6,6 +6,7 @@ geometry:
 
 nu: 0.01
 dt: 0.0005
+diffusion_scheme: explicit
 simulation_time: 10.0
 
 boundary:
