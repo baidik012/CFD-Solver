@@ -231,7 +231,7 @@ class CrankNicolson:
         if right_wall is not None:
             has_noslip, val = right_wall.ghost_cell_coeffs('v')
             if has_noslip:
-                rhs_v[-1, :] += 2.0 * rx * val
+                rhs_v[-1, :] -= 2.0 * rx * val
 
         v_flat = self._solve_v(rhs_v.flatten(order="F"))
         v_star[1:-1, 1:-1] = v_flat.reshape((Nx, Ny - 1), order="F")
@@ -405,7 +405,7 @@ class FFTCrankNicolson:
         if right_wall is not None:
             has_noslip, val = right_wall.ghost_cell_coeffs('v')
             if has_noslip:
-                rhs_v[-1, :] += 2.0 * rx * val
+                rhs_v[-1, :] -= 2.0 * rx * val
 
         # Solve in spectral domain: DST/DCT(axis=0, x) then DST-I(axis=1, y)
         spec_v = dstn(rhs_v, type=self._v_x_type, norm='ortho', axes=(0,))
