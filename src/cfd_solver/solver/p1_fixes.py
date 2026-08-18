@@ -63,7 +63,6 @@ def _p1_inlet_profile(self, wall, N, axis="x"):
         length = float(getattr(self, "_domain_width", 1.0))
     else:
         raise ValueError(f"Unknown inlet axis: {axis!r}")
-
     if length <= 0.0:
         raise ValueError(f"Inlet span must be positive, got {length}")
 
@@ -73,6 +72,33 @@ def _p1_inlet_profile(self, wall, N, axis="x"):
 
 
 from . import bc as bc_module
+from .bc import InletWall, OutletWall
+
+
+def _inlet_top(self, u, v, Nx, Ny, bc):
+    v[1:-1, Ny] = bc._inlet_profile(self, Nx, axis="y")
+    u[:, -1] = -u[:, -2]
+
+
+def _inlet_bottom(self, u, v, Nx, Ny, bc):
+    v[1:-1, 0] = bc._inlet_profile(self, Nx, axis="y")
+    u[:, 0] = -u[:, 1]
+
+
+def _inlet_left(self, u, v, Nx, Ny, bc):
+    u[0, 1:-1] = bc._inlet_profile(self, Ny, axis="x")
+    v[0, :] = -v[1, :]
+
+
+def _inlet_right(self, u, v, Nx, Ny, bc):
+    u[Nx, 1:-1] = bc._inlet_profile(self, Ny, axis="x")
+    v[-1, :] = -v[-2, :]
+
+
+InletWall.apply_top = _inlet_top
+InletWall.apply_bottom = _inlet_bottom
+InletWall.apply_left = _inlet_left
+InletWall.apply_right = _inlet_right
 bc_module.BoundaryConditions._inlet_profile = _p1_inlet_profile
 
 
@@ -91,7 +117,6 @@ class P1Solver(P0Solver):
         if boundary_config is not None:
             px, py = _periodic_flags(boundary_config)
             if diffusion_scheme == "crank_nicolson":
-                from .bc import InletWall, OutletWall
                 if any(
                     isinstance(w, (InletWall, OutletWall))
                     for w in boundary_config.walls.values()
