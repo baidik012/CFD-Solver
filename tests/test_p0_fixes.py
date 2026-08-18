@@ -5,7 +5,7 @@ import pytest
 
 from cfd_solver.solver import BoundaryConditions, Mesh, Solver, create_pressure_solver
 from cfd_solver.solver.bc import InletWall, NoSlipWall, OutletWall, PeriodicWall
-from cfd_solver.solver.p0_fixes import GeneralPeriodicPressureSolver
+from cfd_solver.solver.numerical_fixes import GeneralPeriodicPressureSolver
 
 
 def _periodic_bc(x=False, y=False):

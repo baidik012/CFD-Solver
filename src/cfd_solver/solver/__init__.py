@@ -11,14 +11,14 @@ from . import diagnostics
 from .viz import save_quiver, save_contour, save_streamlines
 
 # Apply the isolated v0.3.2 P0 numerical-correctness layer.
-from .p0_fixes import (  # noqa: E402
+from .numerical_fixes import (  # noqa: E402
     P0Solver,
     GeneralPeriodicPressureSolver,
     create_pressure_solver_p0,
 )
 
 # Apply the P1 lifecycle/restart and compatibility layer on top of P0.
-from .p1_fixes import (  # noqa: E402
+from .lifecycle_fixes import (  # noqa: E402
     P1Solver,
     LegacyPeriodicPressureSolver,
     create_pressure_solver_p1,

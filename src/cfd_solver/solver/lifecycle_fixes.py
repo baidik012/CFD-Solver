@@ -16,7 +16,7 @@ import numpy as np
 
 from . import solver as solver_module
 from . import pressure as pressure_module
-from .p0_fixes import (
+from .numerical_fixes import (
     P0Solver,
     GeneralPeriodicPressureSolver,
     _periodic_flags,
