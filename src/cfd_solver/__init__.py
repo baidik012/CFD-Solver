@@ -8,6 +8,8 @@ various advection and diffusion schemes, and visualization utilities.
 
 try:
     from importlib.metadata import version as _get_version
+    # Only use importlib.metadata if the package is installed in the current environment
+    # (not shadowed by another editable install in sys.path)
     __version__ = _get_version("cfd-solver")
 except Exception:
     # Fallback if the package is not installed (e.g., during development)

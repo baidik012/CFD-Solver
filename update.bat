@@ -40,8 +40,8 @@ if exist venv\ (
     venv\Scripts\python.exe -m pip install -r requirements.txt -q
     venv\Scripts\python.exe -m pip install -e . -q
     echo [OK] Dependencies up to date
-    for /f "delims=" %%i in ('venv\Scripts\python.exe -c "from cfd_solver import __version__; print(__version__)" 2^>nul') do set PKG_VERSION=%%i
-    echo [OK] Package version: %PKG_VERSION%
+    for /f "delims=" %%i in ('venv\Scripts\python.exe -c "import importlib.metadata; print(importlib.metadata.version('cfd-solver'))" 2^>nul') do set PKG_VERSION=%%i
+        echo [OK] Package version: %PKG_VERSION%
 ) else (
     echo [SKIP] No virtual environment found. Run setup.bat first.
 )
