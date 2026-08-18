@@ -15,13 +15,9 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from cfd_solver.solver import Solver
-from cfd_solver.solver.bc import (
-    BoundaryConditions, NoSlipWall, InletWall, OutletWall,
-)
+from cfd_solver.solver.bc import BoundaryConditions, NoSlipWall, InletWall, OutletWall
 from cfd_solver.solver.viz import save_contour
-from cfd_solver.validation import (
-    extract_profile, compute_l2_error, compute_linf_error, print_error_report,
-)
+from cfd_solver.validation import extract_profile, compute_l2_error, compute_linf_error, print_error_report
 from cfd_solver.config_loader import load_config
 
 
@@ -33,16 +29,12 @@ def parabolic_profile(y, H, U_max=1.0):
 def _auto_output_name(cfg, variant):
     """Generate a descriptive output filename from config parameters."""
     geo = cfg["geometry"]
-    nu = cfg["nu"]
     dt = cfg["dt"]
     sim_time = cfg.get("simulation_time", 0)
-
     tag = f"{variant}_Nx{geo['Nx']}_Ny{geo['Ny']}_dt{dt}"
     if sim_time:
         tag += f"_t{sim_time}"
-    return os.path.join(
-        os.path.dirname(__file__), "..", "..", "output", "channel_flow", f"result_{tag}.png"
-    )
+    return os.path.join(os.path.dirname(__file__), "..", "..", "output", "channel_flow", f"result_{tag}.png")
 
 
 def run_inlet_outlet(cfg, output_path):
@@ -62,6 +54,7 @@ def run_inlet_outlet(cfg, output_path):
     solver = Solver(
         grid_size=(geo["Nx"], geo["Ny"]), nu=nu, dt=dt,
         Lx=geo["Lx"], Ly=geo["Ly"],
+        diffusion_scheme="explicit",
         boundary_config=bc, force=True,
     )
     solver.solve(simulation_time=sim_time, verbose=True)
@@ -72,14 +65,11 @@ def run_inlet_outlet(cfg, output_path):
 
     l2 = compute_l2_error(u_num, u_exact)
     linf = compute_linf_error(u_num, u_exact)
-
     save_contour(solver.mesh, solver.u, solver.v, solver.p, output_path)
 
     print_error_report(
-        "Channel Flow (Inlet/Outlet)",
-        l2=l2, linf=linf,
-        divergence=solver.max_divergence(),
-        grid=f"{solver.Nx}x{solver.Ny}",
+        "Channel Flow (Inlet/Outlet)", l2=l2, linf=linf,
+        divergence=solver.max_divergence(), grid=f"{solver.Nx}x{solver.Ny}",
         extra={"Time": f"{solver.time:.1f}s", "Output": output_path},
     )
     return solver
@@ -94,34 +84,28 @@ def run_body_force(cfg, output_path):
     f_val = cfg.get("body_force", {}).get("u", 8.0)
 
     bc = BoundaryConditions(
-        top=NoSlipWall(u=0.0),
-        bottom=NoSlipWall(u=0.0),
-        left=NoSlipWall(u=0.0),
-        right=NoSlipWall(u=0.0),
+        top=NoSlipWall(u=0.0), bottom=NoSlipWall(u=0.0),
+        left=NoSlipWall(u=0.0), right=NoSlipWall(u=0.0),
     )
     solver = Solver(
         grid_size=(geo["Nx"], geo["Ny"]), nu=nu, dt=dt,
-        Lx=geo["Lx"], Ly=geo["Ly"],
-        lid_speed=0.0, boundary_config=bc,
+        Lx=geo["Lx"], Ly=geo["Ly"], lid_speed=0.0,
+        boundary_config=bc,
         body_force=lambda u, v, t: (np.full_like(u, f_val), np.zeros_like(v)),
     )
     solver.solve(simulation_time=sim_time, verbose=True)
 
     dp_dx = np.mean((solver.p[2:-1, 1:-1] - solver.p[1:-2, 1:-1]) / solver.dx)
-
     save_contour(solver.mesh, solver.u, solver.v, solver.p, output_path)
 
-    # (Audit fix #8 — previously hardcoded l2=0.0, linf=0.0.)
     print_error_report(
         "Channel Flow (Body Force, Closed Box)",
-        l2=float('nan'), linf=float('nan'),
-        divergence=solver.max_divergence(),
+        l2=float('nan'), linf=float('nan'), divergence=solver.max_divergence(),
         grid=f"{solver.Nx}x{solver.Ny}",
         extra={
             "dp/dx": f"{dp_dx:.6f} (target: {-f_val:.1f})",
             "Mean u": f"{np.mean(solver.u[1:-1, 1:-1]):.6f} (target: ~0)",
-            "Time": f"{solver.time:.1f}s",
-            "Output": output_path,
+            "Time": f"{solver.time:.1f}s", "Output": output_path,
         },
     )
     return solver
@@ -130,8 +114,7 @@ def run_body_force(cfg, output_path):
 def main():
     parser = argparse.ArgumentParser(description="Channel flow")
     parser.add_argument("--variant", choices=["inlet", "body-force"], default="inlet")
-    parser.add_argument("--config", "-c", default=None,
-                        help="Path to config YAML (overrides --variant)")
+    parser.add_argument("--config", "-c", default=None, help="Path to config YAML (overrides --variant)")
     parser.add_argument("--output", "-o", default=None)
     args = parser.parse_args()
 
@@ -143,10 +126,7 @@ def main():
     else:
         config_path = os.path.join(script_dir, "config_body_force.yaml")
 
-    # load_config() validates the YAML schema before returning.
-    # (Audit finding P1-6 — examples previously skipped validation.)
     cfg = load_config(config_path)
-
     out = args.output or _auto_output_name(cfg, args.variant)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 
