@@ -3,11 +3,9 @@
 P1 fixes:
 - preserve physical simulation time across checkpoints;
 - apply an initial condition only once across repeated solve() calls;
-- keep the P0 periodic pressure/velocity fixes without inheriting the P0
-  constructor's over-restrictive CN/Inlet/Outlet guard;
-- preserve the legacy PeriodicPressureSolver(mesh) API while allowing the
-  generalized factory to return the same compatible class;
-- make parabolic inlet profiles use the actual domain height.
+- preserve the P0 CN/Inlet/Outlet safety guard;
+- preserve the legacy PeriodicPressureSolver(mesh) API;
+- make inlet profiles follow the actual inlet direction and domain size.
 """
 
 from __future__ import annotations
@@ -52,18 +50,25 @@ pressure_module.create_pressure_solver = create_pressure_solver_p1
 solver_module.create_pressure_solver = create_pressure_solver_p1
 
 
-def _p1_inlet_profile(self, wall, Ny, axis="x"):
-    """Return an inlet profile using the physical domain height."""
+def _p1_inlet_profile(self, wall, N, axis="x"):
+    """Return an inlet profile at face positions along the inlet."""
     if wall.profile == "uniform":
-        return np.full(Ny, wall.U_max, dtype=float)
+        return np.full(N, wall.U_max, dtype=float)
     if wall.profile != "parabolic":
         raise ValueError(f"Unknown inlet profile: {wall.profile!r}")
 
-    H = float(getattr(self, "_domain_height", 1.0))
-    if H <= 0.0:
-        raise ValueError(f"Domain height must be positive, got {H}")
-    y = (np.arange(Ny, dtype=float) + 0.5) * H / Ny
-    eta = y / H
+    if axis == "x":
+        length = float(getattr(self, "_domain_height", 1.0))
+    elif axis == "y":
+        length = float(getattr(self, "_domain_width", 1.0))
+    else:
+        raise ValueError(f"Unknown inlet axis: {axis!r}")
+
+    if length <= 0.0:
+        raise ValueError(f"Inlet span must be positive, got {length}")
+
+    coordinate = (np.arange(N, dtype=float) + 0.5) * length / N
+    eta = coordinate / length
     return 4.0 * wall.U_max * eta * (1.0 - eta)
 
 
@@ -71,9 +76,8 @@ from . import bc as bc_module
 bc_module.BoundaryConditions._inlet_profile = _p1_inlet_profile
 
 
-# p0_fixes has replaced solver_module.Solver with P0Solver. Its immediate base
-# is the original Solver implementation, which is what P1 needs in order to
-# bypass only the accidental P0 CN/Inlet/Outlet constructor guard.
+# P0Solver's immediate base is the original Solver implementation. P1 uses it
+# to retain the P0 numerical changes while adding lifecycle fixes.
 _BaseSolver = P0Solver.__mro__[1]
 
 
@@ -82,8 +86,21 @@ class P1Solver(P0Solver):
 
     def __init__(self, *args, **kwargs):
         boundary_config = kwargs.get("boundary_config")
+        diffusion_scheme = kwargs.get("diffusion_scheme", "crank_nicolson")
+
         if boundary_config is not None:
             px, py = _periodic_flags(boundary_config)
+            if diffusion_scheme == "crank_nicolson":
+                from .bc import InletWall, OutletWall
+                if any(
+                    isinstance(w, (InletWall, OutletWall))
+                    for w in boundary_config.walls.values()
+                ):
+                    raise ValueError(
+                        "Crank-Nicolson is not currently valid for InletWall/OutletWall "
+                        "normal-velocity boundaries. Use diffusion_scheme='explicit' "
+                        "until the mixed-BC implicit operator is implemented."
+                    )
         else:
             px = py = False
 
