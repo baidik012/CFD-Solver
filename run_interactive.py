@@ -44,8 +44,43 @@ EXAMPLE_DEFAULTS = {
 }
 
 
-def _default_output_path(example, project_root, variant=None):
-    """Return the canonical output path for a given example run."""
+def _default_output_path(example, project_root, variant=None, params=None):
+    """Return the canonical output path for a given example run.
+
+    If params is provided, generate an auto-named file based on key parameters
+    (Re, Nx, Ny, dt, sim_time, etc.) to avoid overwriting previous runs.
+    """
+    if example == "cavity" and params:
+        nu = params.get("nu", 0.01)
+        lid_speed = params.get("lid_speed", 1.0)
+        Re = abs(lid_speed) / max(nu, 1e-12)
+        Nx, Ny = params["Nx"], params["Ny"]
+        dt = params["dt"]
+        sim_time = params["simulation_time"]
+        tag = f"Re{int(Re)}_Nx{Nx}_Ny{Ny}_dt{dt}_t{sim_time}"
+        return os.path.join(project_root, "output", "cavity", f"result_{tag}.png")
+    elif example == "couette" and params:
+        Nx, Ny = params["Nx"], params["Ny"]
+        dt = params["dt"]
+        nu = params["nu"]
+        sim_time = params["simulation_time"]
+        tag = f"Nx{Nx}_Ny{Ny}_dt{dt}_nu{nu}_t{sim_time}"
+        return os.path.join(project_root, "output", "couette", f"result_{tag}.png")
+    elif example == "taylor_green" and params:
+        Nx, Ny = params["Nx"], params["Ny"]
+        dt = params["dt"]
+        nu = params["nu"]
+        sim_time = params["simulation_time"]
+        tag = f"Nx{Nx}_Ny{Ny}_dt{dt}_nu{nu}_t{sim_time}"
+        return os.path.join(project_root, "output", "taylor_green", f"result_{tag}.png")
+    elif example == "channel" and params:
+        Nx, Ny = params["Nx"], params["Ny"]
+        dt = params["dt"]
+        sim_time = params["simulation_time"]
+        variant = variant or "inlet"
+        tag = f"{variant}_Nx{Nx}_Ny{Ny}_dt{dt}_t{sim_time}"
+        return os.path.join(project_root, "output", "channel_flow", f"result_{tag}.png")
+    # Fallback to fixed name if no params provided
     if example == "channel" and variant:
         return os.path.join(project_root, "output", "channel_flow", f"result_{variant}.png")
     return os.path.join(project_root, "output", example, "result.png")
@@ -255,18 +290,18 @@ def _prompt_params(example):
     return params
 
 
-def _resolve_output_path(example, args, project_root, variant=None):
+def _resolve_output_path(example, args, project_root, variant=None, params=None):
     """Determine output path from CLI args or default location."""
     if "--output" in args:
         i = args.index("--output")
-        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant)
+        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant, params)
     if "-o" in args:
         i = args.index("-o")
-        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant)
-    return _default_output_path(example, project_root, variant)
+        return args[i + 1] if i + 1 < len(args) else _default_output_path(example, project_root, variant, params)
+    return _default_output_path(example, project_root, variant, params)
 
 
-def _spawn_example(example, project_root, extra_args=None):
+def _spawn_example(example, project_root, extra_args=None, params=None):
     """
     Run an example script as a subprocess and return its output path.
 
@@ -286,7 +321,7 @@ def _spawn_example(example, project_root, extra_args=None):
         if variant is None:
             variant = "inlet"
 
-    out_path = _resolve_output_path(example, extra_args, project_root, variant)
+    out_path = _resolve_output_path(example, extra_args, project_root, variant, params)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
     # Always pass --output so we know exactly where the result lands.
@@ -302,7 +337,8 @@ def _spawn_example(example, project_root, extra_args=None):
 
 def run_example(example, project_root):
     """Run a bundled example with its default parameters."""
-    return _spawn_example(example, project_root, [])
+    defaults = EXAMPLE_DEFAULTS[example]
+    return _spawn_example(example, project_root, [], params=defaults)
 
 
 def run_custom_example(example, project_root):
@@ -331,7 +367,7 @@ def run_custom_example(example, project_root):
         extra_args = ["--config", tmp_path]
         if example == "channel":
             extra_args += ["--variant", params.get("variant", "inlet")]
-        return _spawn_example(example, script_dir, extra_args)
+        return _spawn_example(example, script_dir, extra_args, params=params)
     finally:
         if os.path.exists(tmp_path):
             try:
