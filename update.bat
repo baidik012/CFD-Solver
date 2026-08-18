@@ -34,17 +34,12 @@ REM Show the current version
 for /f "delims=" %%i in ('git describe --tags --always 2^>nul') do set VERSION=%%i
 echo [OK] Current version: %VERSION%
 
-REM Re-install the package in case dependencies or entry points changed
-if exist venv\ (
-    echo [..] Updating dependencies...
-    venv\Scripts\python.exe -m pip install -r requirements.txt -q
-    venv\Scripts\python.exe -m pip install -e . -q
-    echo [OK] Dependencies up to date
-    for /f "delims=" %%i in ('venv\Scripts\python.exe -c "import importlib.metadata; print(importlib.metadata.version('cfd-solver'))" 2^>nul') do set PKG_VERSION=%%i
-        echo [OK] Package version: %PKG_VERSION%
-) else (
-    echo [SKIP] No virtual environment found. Run setup.bat first.
+REM Get package version from git tag (more reliable than importlib.metadata with multiple editable installs)
+for /f "delims=" %%i in ('git tag --points-at HEAD 2^>nul') do set PKG_VERSION=%%i
+if "%PKG_VERSION%"=="" (
+    for /f "delims=" %%i in ('git describe --tags --always 2^>nul') do set PKG_VERSION=%%i
 )
+echo [OK] Package version: %PKG_VERSION%
 
 echo.
 echo ========================================
