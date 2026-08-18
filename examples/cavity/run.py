@@ -9,6 +9,8 @@ Usage:
 import os
 import sys
 import argparse
+import json
+import hashlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -16,6 +18,25 @@ from cfd_solver.solver import Solver
 from cfd_solver.solver.viz import save_contour
 from cfd_solver.validation import print_error_report
 from cfd_solver.config_loader import load_config
+
+
+def _auto_output_name(cfg, example_name):
+    """Generate a descriptive output filename from config parameters."""
+    geo = cfg["geometry"]
+    nu = cfg["nu"]
+    dt = cfg["dt"]
+    sim_time = cfg.get("simulation_time", 0)
+    bc_cfg = cfg.get("boundary", {})
+    top_cfg = bc_cfg.get("top", {})
+    top_u = top_cfg.get("u", 1.0) if isinstance(top_cfg, dict) else 1.0
+    Re = abs(top_u) / max(nu, 1e-12)
+
+    tag = f"Re{int(Re)}_Nx{geo['Nx']}_Ny{geo['Ny']}_dt{dt}"
+    if sim_time:
+        tag += f"_t{sim_time}"
+    return os.path.join(
+        os.path.dirname(__file__), "..", "..", "output", example_name, f"result_{tag}.png"
+    )
 
 
 def main():
@@ -62,7 +83,7 @@ def main():
     if args.output:
         out = args.output
     else:
-        out = os.path.join(os.path.dirname(__file__), "..", "..", "output", "cavity", "result.png")
+        out = _auto_output_name(cfg, "cavity")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     save_contour(solver.mesh, solver.u, solver.v, solver.p, out)
 

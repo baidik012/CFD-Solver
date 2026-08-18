@@ -30,6 +30,21 @@ def parabolic_profile(y, H, U_max=1.0):
     return 4.0 * U_max * y * (H - y) / (H ** 2)
 
 
+def _auto_output_name(cfg, variant):
+    """Generate a descriptive output filename from config parameters."""
+    geo = cfg["geometry"]
+    nu = cfg["nu"]
+    dt = cfg["dt"]
+    sim_time = cfg.get("simulation_time", 0)
+
+    tag = f"{variant}_Nx{geo['Nx']}_Ny{geo['Ny']}_dt{dt}"
+    if sim_time:
+        tag += f"_t{sim_time}"
+    return os.path.join(
+        os.path.dirname(__file__), "..", "..", "output", "channel_flow", f"result_{tag}.png"
+    )
+
+
 def run_inlet_outlet(cfg, output_path):
     """Run channel flow with inlet/outlet BCs."""
     geo = cfg["geometry"]
@@ -132,7 +147,7 @@ def main():
     # (Audit finding P1-6 — examples previously skipped validation.)
     cfg = load_config(config_path)
 
-    out = args.output or os.path.join(script_dir, "..", "..", "output", "channel_flow", f"result_{args.variant}.png")
+    out = args.output or _auto_output_name(cfg, args.variant)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 
     if args.variant == "inlet":

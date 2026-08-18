@@ -47,6 +47,21 @@ def taylor_green_ic(mesh):
     return u, v, p
 
 
+def _auto_output_name(cfg):
+    """Generate a descriptive output filename from config parameters."""
+    geo = cfg["geometry"]
+    nu = cfg["nu"]
+    dt = cfg["dt"]
+    sim_time = cfg.get("simulation_time", 0)
+
+    tag = f"Nx{geo['Nx']}_Ny{geo['Ny']}_dt{dt}_nu{nu}"
+    if sim_time:
+        tag += f"_t{sim_time}"
+    return os.path.join(
+        os.path.dirname(__file__), "..", "..", "output", "taylor_green", f"result_{tag}.png"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Taylor-Green vortex")
     parser.add_argument("--config", "-c", default=None,
@@ -100,7 +115,7 @@ def main():
     if args.output:
         out = args.output
     else:
-        out = os.path.join(script_dir, "..", "..", "output", "taylor_green", "result.png")
+        out = _auto_output_name(cfg)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     s.save(out)
     print(f"  Saved to {out}")

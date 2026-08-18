@@ -11,4 +11,4 @@ try:
     __version__ = _get_version("cfd-solver")
 except Exception:
     # Fallback if the package is not installed (e.g., during development)
-    __version__ = "0.3.2"
+    __version__ = "0.3.3"

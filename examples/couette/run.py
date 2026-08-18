@@ -40,6 +40,21 @@ def couette_analytical_transient(y, t, nu, U=1.0, H=1.0, n_terms=50):
     return result
 
 
+def _auto_output_name(cfg):
+    """Generate a descriptive output filename from config parameters."""
+    geo = cfg["geometry"]
+    nu = cfg["nu"]
+    dt = cfg["dt"]
+    sim_time = cfg.get("simulation_time", 0)
+
+    tag = f"Nx{geo['Nx']}_Ny{geo['Ny']}_dt{dt}_nu{nu}"
+    if sim_time:
+        tag += f"_t{sim_time}"
+    return os.path.join(
+        os.path.dirname(__file__), "..", "..", "output", "couette", f"result_{tag}.png"
+    )
+
+
 def run_couette(cfg, output_path):
     """Run Couette flow simulation."""
     geo = cfg["geometry"]
@@ -108,7 +123,7 @@ def main():
     config_path = args.config or os.path.join(script_dir, "config.yaml")
     cfg = load_config(config_path)
 
-    out = args.output or os.path.join(script_dir, "..", "..", "output", "couette", "result.png")
+    out = args.output or _auto_output_name(cfg)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     run_couette(cfg, out)
 
