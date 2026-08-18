@@ -22,34 +22,19 @@ from cfd_solver.config_loader import load_config
 from cfd_solver.utils import handle_error
 
 
-# Wall-type lookup derived from the single source of truth in bc.py.
 _WALL_TYPE_MAP = WALL_TYPE_REGISTRY
 
 
 def _parse_boundary_config(bc_cfg):
-    """Parse a boundary config dict into a :class:`BoundaryConditions`.
-
-    Supports both the legacy ``top`` / ``other`` format and the new
-    per-wall format with ``type`` keys.
-
-    Parameters
-    ----------
-    bc_cfg : dict
-        The ``boundary`` section of the YAML config.
-
-    Returns
-    -------
-    BoundaryConditions
-    """
+    """Parse a boundary config dict into a :class:`BoundaryConditions`."""
     if bc_cfg is None:
         bc_cfg = {}
 
     smooth_lid = bc_cfg.get("smooth_lid", True)
 
-    # Detect new per-wall format: any of left/right/bottom has a 'type' key
     has_new_format = any(
         isinstance(bc_cfg.get(w), dict) and "type" in bc_cfg.get(w, {})
-        for w in ("left", "right", "bottom")
+        for w in ("left", "right", "top", "bottom")
     )
 
     if has_new_format:
@@ -60,7 +45,9 @@ def _parse_boundary_config(bc_cfg):
                 walls[wall_name] = NoSlipWall(u=0.0, v=0.0)
                 continue
             wtype = wall_cfg["type"]
-            cls = _WALL_TYPE_MAP.get(wtype, NoSlipWall)
+            cls = _WALL_TYPE_MAP.get(wtype)
+            if cls is None:
+                raise ValueError(f"Unknown wall type: {wtype!r}")
             if wtype == "wall":
                 walls[wall_name] = NoSlipWall(
                     u=wall_cfg.get("u", 0.0),
@@ -82,8 +69,6 @@ def _parse_boundary_config(bc_cfg):
                 )
             elif wtype == "periodic":
                 walls[wall_name] = PeriodicWall()
-            else:
-                walls[wall_name] = NoSlipWall(u=0.0, v=0.0)
 
         return BoundaryConditions(
             top=walls['top'],
@@ -93,7 +78,6 @@ def _parse_boundary_config(bc_cfg):
             smooth_lid=smooth_lid,
         )
 
-    # Legacy format: top.u + smooth_lid
     top = bc_cfg.get("top", {})
     top_u = top.get("u", 1.0)
     return BoundaryConditions(top=top_u, smooth_lid=smooth_lid)
@@ -120,27 +104,25 @@ def _parse_convergence(conv_cfg):
 
 
 def run(args):
-    """
-    Execute the simulation based on command-line arguments.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        The parsed command-line arguments.
-    """
+    """Execute the simulation based on command-line arguments."""
     if args.resume:
-        # Resume from an existing checkpoint
         if not os.path.exists(args.resume):
             print(f"Error: checkpoint not found: {args.resume}")
             raise SystemExit(1)
-        solver = Solver.from_checkpoint(args.resume)
-        # Config is optional when resuming — only load if provided.
+
         if args.config:
             cfg = load_config(args.config)
+            bc = _parse_boundary_config(cfg.get("boundary", {}))
+            body_force = _parse_body_force(cfg.get("body_force"))
+            solver = Solver.from_checkpoint(
+                args.resume,
+                body_force=body_force,
+                boundary_config=bc,
+            )
         else:
             cfg = {}
+            solver = Solver.from_checkpoint(args.resume)
     else:
-        # Start a new simulation from a config file
         if args.config is None:
             print("Error: config file required (or use --resume to load a checkpoint)",
                   file=sys.stderr)
@@ -149,11 +131,8 @@ def run(args):
             print(f"Error: config file not found: {args.config}")
             raise SystemExit(1)
 
-        # load_config() runs validate_config() and exits with clear
-        # error messages on schema failure.
         cfg = load_config(args.config)
 
-        # Extract parameters from config
         geo = cfg["geometry"]
         Lx, Ly = geo["Lx"], geo["Ly"]
         Nx, Ny = geo["Nx"], geo["Ny"]
@@ -164,15 +143,9 @@ def run(args):
         smooth = bc_cfg.get("smooth_lid", True)
         advection_scheme = cfg.get("advection_scheme", "upwind")
         diffusion_scheme = cfg.get("diffusion_scheme", "crank_nicolson")
-
-        # Parse body force
         body_force = _parse_body_force(cfg.get("body_force"))
-
-        # Parse boundary conditions (supports both legacy and new per-wall format)
         bc = _parse_boundary_config(bc_cfg)
 
-        # Warn about validated-but-unsupported fields rather than silently
-        # ignoring them, so configs are never silently misinterpreted.
         ignored = []
         top_cfg = bc_cfg.get("top", {})
         if isinstance(top_cfg, dict) and top_cfg.get("v") not in (None, 0, 0.0):
@@ -189,7 +162,6 @@ def run(args):
                 file=sys.stderr,
             )
 
-        # Initialize the solver
         solver = Solver(
             grid_size=(Nx, Ny), nu=nu, dt=dt,
             Lx=Lx, Ly=Ly,
@@ -199,12 +171,10 @@ def run(args):
             body_force=body_force,
         )
 
-    # Simulation loop — prefer simulation_time over steps
     sim_time = cfg.get("simulation_time")
     steps = cfg.get("steps")
     conv_tol, conv_window = _parse_convergence(cfg.get("convergence"))
     if sim_time is None and steps is None:
-        # Auto-compute from flow parameters: max(10, 0.1*Re) convective time units
         nu_val = cfg.get("nu", 0.01)
         bc_cfg_auto = cfg.get("boundary", {})
         top_cfg = bc_cfg_auto.get("top", {})
@@ -231,7 +201,6 @@ def run(args):
         )
         raise SystemExit(1)
 
-    # Save results and checkpoint
     save_contour(solver.mesh, solver.u, solver.v, solver.p, args.output)
     solver.checkpoint(args.output.rsplit(".", 1)[0] + ".npz")
 
@@ -266,17 +235,10 @@ def run_example(args):
 
 
 def main():
-    """
-    Main entry point for the CLI.
-
-    Parses arguments, checks for updates, and dispatches to the appropriate command.
-    """
+    """Parse arguments and dispatch to the selected command."""
     from cfd_solver import __version__
     from cfd_solver.version_check import check_for_updates
 
-    # Pre-scan argv for --no-update-check so we can skip the network call
-    # before constructing the full argparse parser. The env var
-    # CFD_SOLVER_NO_UPDATE_CHECK=1 has the same effect.
     if "--no-update-check" in sys.argv:
         os.environ["CFD_SOLVER_NO_UPDATE_CHECK"] = "1"
     check_for_updates()
@@ -289,7 +251,6 @@ def main():
     )
     sub = parser.add_subparsers(required=True)
 
-    # 'run' subcommand
     run_parser = sub.add_parser("run", help="Run a simulation")
     run_parser.add_argument("config", nargs="?", default=None,
                             help="YAML config file (optional with --resume)")
@@ -303,7 +264,6 @@ def main():
     )
     run_parser.set_defaults(func=run)
 
-    # 'run-example' subcommand
     example_parser = sub.add_parser("run-example", help="Run a bundled example")
     example_parser.add_argument(
         "name", help="Example name (cavity, channel_flow, couette, taylor_green)",
